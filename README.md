@@ -159,9 +159,11 @@ with Godot 4.7.2 package smoke tests. It generates a combined addon ZIP. After
 merging, pushing a tag like `v0.3.1` triggers a **prerelease** only when both
 platform builds and checks pass.
 
-Run [integration tests](docs/TESTING.md) before proposing a release. Linux
-tests use PostgreSQL in Docker; Windows packaging tests use the PostgreSQL
-instance preinstalled on GitHub's Windows 2022 runner.
+Run [integration tests](docs/TESTING.md) before proposing a release. Linux CI
+tests against PostgreSQL in Docker; **independent Windows CI** builds a
+native DLL and runs the same SQLite/PostgreSQL tests directly on
+`windows-2022`, using the runner's preinstalled PostgreSQL service.
+Release packaging and runtime integration are separate checks.
 
 ## License
 

@@ -8,8 +8,16 @@ if ($postgres.Status -ne 'Running') {
 }
 $ready = Join-Path $env:PGBIN 'pg_isready.exe'
 if (!(Test-Path $ready)) { throw 'PostgreSQL tool not found on runner' }
-& $ready -h 127.0.0.1 -p 5432 -U postgres -d postgres
-if ($LASTEXITCODE -ne 0) { throw 'Local PostgreSQL is unavailable' }
+$available = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    & $ready -h 127.0.0.1 -p 5432 -U postgres -d postgres
+    if ($LASTEXITCODE -eq 0) {
+        $available = $true
+        break
+    }
+    Start-Sleep -Seconds 1
+}
+if (-not $available) { throw 'Local PostgreSQL did not become ready within 30 seconds' }
 if (-not $env:GODOT_SOCI_PG) { throw 'GODOT_SOCI_PG missing' }
 
 # Godot 4.7: delay editor shutdown to avoid GDExtension documentation race.

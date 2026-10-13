@@ -8,8 +8,6 @@ on:
       - 'addons/godot_soci/**'
       - 'scripts/package_addon.py'
       - 'scripts/smoke_release.py'
-      - 'tests/**'
-      - 'scripts/run_windows_tests.ps1'
       - 'README.md'
       - 'docs/**'
   workflow_dispatch:
@@ -136,17 +134,6 @@ jobs:
           if (-not $godot) { throw 'Console-enabled Godot binary missing' }
           python scripts/smoke_release.py --zip dist/godot-soci-windows.zip --godot "$godot"
           if ($LASTEXITCODE -ne 0) { throw 'Windows smoke test failed' }
-      - name: Integration tests with native SQLite and PostgreSQL (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          GODOT_SOCI_PG: 'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=root connect_timeout=3'
-        run: |
-          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $godot) { throw 'Godot console executable missing' }
-          & ./scripts/run_windows_tests.ps1 -Godot "$godot"
-          if ($LASTEXITCODE -ne 0) { throw 'Windows integration tests failed' }
-
       - uses: actions/upload-artifact@v6
         with:
           name: addon-${{ matrix.platform }}

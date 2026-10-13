@@ -18,11 +18,19 @@ docker compose -f demo/postgresql/docker-compose.yml down -v
 
 ## Windows
 
-The release workflow builds two MSVC configurations using vcpkg
-`x64-windows-static-md`. It starts the **preinstalled PostgreSQL 14 service**
-on the GitHub-hosted Windows 2022 runner and uses the documented local test
-credentials for that ephemeral runner only. It then runs the same native
-integration scripts via `scripts/run_windows_tests.ps1`.
+The independent **`Godot 4.7 integration (Windows)`** workflow
+(`.github/workflows/windows-integration.yml`) runs on `windows-2022`
+on every pull request and push to `main`, completely independently of the
+release packaging workflow. It compiles a native `template_debug` DLL using
+MSVC and pinned vcpkg `x64-windows-static-md`. It starts the runner's
+**preinstalled PostgreSQL 14 service**, then runs all six headless integration
+scripts against real SQLite and PostgreSQL using `scripts/run_windows_tests.ps1`.
+
+The release workflow still builds both debug and release binaries, runs an
+isolated packaged-addon smoke test and assembles ZIPs. It does not substitute
+for the Windows integration workflow. Both CI workflows must pass before
+publishing an addon. The PostgreSQL user/password are test-only defaults of
+the ephemeral hosted Windows runner.
 
 The Windows service is runner-specific. On your own machine, configure
 `GODOT_SOCI_PG` to a disposable local PostgreSQL database and adjust

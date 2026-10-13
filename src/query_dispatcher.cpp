@@ -347,6 +347,7 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
         } else {
             completed.id = job.id;
             completed.query = job.query;
+            completed.transaction = job.transaction;
             completed.error = connection_error.empty() ? "Database unavailable." : connection_error;
         }
         {
@@ -418,6 +419,11 @@ void SociQueryDispatcher::stop() {
     Dictionary cancelled;
     cancelled["ok"] = false;
     cancelled["error"] = "Async database dispatcher stopped before request completion.";
+    cancelled["outcome_unknown"] = false;
+    cancelled["affected_rows"] = int64_t(0);
+    cancelled["affected_rows_per_statement"] = Array();
+    cancelled["rows"] = Array();
+    cancelled["truncated"] = false;
     for (auto &entry : outstanding) entry.second->resolve(cancelled);
     stopping_ = false;
 }

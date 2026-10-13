@@ -1,27 +1,151 @@
 # godot-soci
 
-An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing synchronous and asynchronous SQLite/PostgreSQL APIs to GDScript.
+Godot **4.7+ GDExtension** exposing [SOCI](https://github.com/SOCI/soci)
+SQLite and PostgreSQL backends through native C++ and GDScript APIs.
 
-> **Status: v0.3.1 preview.** Under active validation; avoid using it for production payments or game economies without further testing. Installable ZIP artifacts are produced by the release workflow for Linux and Windows x86_64. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
+**Status:** v0.3.1 pre-release. Linux and Windows x86_64 packaging/real-DB
+integration checks are required before publication. This is not yet a
+production-certified persistence layer for a multiplayer game economy.
 
-Read the **[API reference](docs/API.md)** for every public method and result shape,
-**[guarantees and limitations](docs/API.md#guarantees-caveats-and-explicitly-unsupported-features)**,
-and **[integration test coverage](docs/TESTING.md)**.
+[API reference](docs/API.md) · [Integration test matrix](docs/TESTING.md) ·
+[Architecture](docs/ARCHITECTURE.md)
 
-## Features
+## Installation
 
-- `GodotSociDatabase` native `RefCounted` class plus optional `SociDatabase` wrapper in `addons/godot_soci/database.gd`.
-- SQLite (`sqlite3`) and PostgreSQL (`postgresql`) via native SOCI backends.
-- Named SQL binds for `null`, `bool`, 64-bit signed integers, floats and UTF-8 strings.
-- Bounded results: `query()` returns `{ok, error, rows, truncated}`; `execute()` returns `{ok, error, affected_rows}`.
-- Explicit transactions: `begin()`, SQLite `begin_immediate()`, `commit()`, and `rollback()`.
-- Duplicate SQL result column names rejected (use `AS` aliases).
-- Native single-worker asynchronous dispatcher, bounded pending requests and retained request completion.
-- A dedicated threaded SQLite example for users of the synchronous API.
+Download the **installable ZIP** from [GitHub Releases](../../releases)
+(after the release workflow succeeds). Extract the included
+`addons/godot_soci/` directory into your Godot project:
 
-## Build
+```text
+res://
+└── addons/
+    └── godot_soci/
+        ├── soci.gdextension
+        ├── database.gd
+        ├── async_database.gd
+        ├── docs/
+        ├── licenses/
+        └── bin/
+            ├── linux/
+            └── windows/
+```
 
-Requires CMake 3.23+, Git, Python 3, C++17 compiler, SQLite development libraries and optionally PostgreSQL/`libpq`. CMake fetches pinned `godot-cpp` and SOCI revisions.
+The ZIP contains **Debug and Release** GDExtension variants for Linux and
+Windows x86_64. There is no `plugin.cfg`, EditorPlugin toggle, or requirement
+for users to compile C++.
+
+The Windows binaries are designed to use the redistributable MSVC **/MD**
+runtime, rather than the Visual Studio Debug CRT. The workflow checks that
+PostgreSQL/SQLite native dependencies are statically linked; Windows and Linux
+packaging must pass real-engine smoke tests before release. Linux builds
+target Ubuntu 22.04-era glibc or newer.
+
+Godot's auto-downloaded GitHub *source-code* ZIP is **not** the addon ZIP: it
+does not contain compiled native libraries.
+
+## Quick start
+
+The high-level async API lives in `SociAsyncDatabase`. Add it to the
+SceneTree so it can deliver completions on the main thread:
+
+```gdscript
+var db := SociAsyncDatabase.new()
+add_child(db)
+
+if not db.start("sqlite3", ProjectSettings.globalize_path("user://game.db")):
+    push_error(db.get_last_error())
+    return
+
+var schema: Dictionary = await db.execute_async(
+    "CREATE TABLE IF NOT EXISTS players (id INTEGER PRIMARY KEY, name TEXT)"
+)
+var inserted: Dictionary = await db.execute_async(
+    "INSERT INTO players (id, name) VALUES (:id, :name)",
+    {"id": 42, "name": "Hero"}
+)
+var selected: Dictionary = await db.query_async(
+    "SELECT id, name FROM players WHERE id = :id", {"id": 42}
+)
+if selected.get("ok", false):
+    print(selected["rows"])
+
+db.stop()
+db.queue_free()
+```
+
+`start()` means the worker launched; it does **not** guarantee that a
+connection has been established. Check returned `ok` and `error` fields.
+The native `SociQueryDispatcher` returns a `SociQueryRequest` object or
+`null` when scheduling is rejected; the GDScript convenience wrapper returns
+an error dictionary for immediate rejection.
+
+Synchronous API: `GodotSociDatabase.new()` (native) or
+`SociDatabase.new()` (GDScript). Use synchronous methods only where blocking
+is acceptable. See the [API reference](docs/API.md).
+
+## Atomic SQL batches
+
+```gdscript
+var result: Dictionary = await db.transaction_async([
+    {
+        "sql": "UPDATE wallets SET gold=gold-:sum WHERE id=:id AND gold>=:sum",
+        "params": {"id": 1, "sum": 50},
+        "expected_affected_rows": 1
+    },
+    {
+        "sql": "UPDATE wallets SET gold=gold+:sum WHERE id=:id",
+        "params": {"id": 2, "sum": 50},
+        "expected_affected_rows": 1
+    }
+])
+if not result.get("ok", false):
+    if result.get("outcome_unknown", false):
+        push_error("Commit result is unknown: reconcile before retrying")
+    else:
+        push_error(result.get("error", "Transaction failed"))
+```
+
+The statements run on **one session inside one SQL transaction**. On a normal
+statement error or affected-row precondition failure, the batch rolls back.
+If COMMIT fails, the operation may already have been committed; callers must
+use durable operation IDs and state reconciliation rather than blindly retrying.
+
+A SQL transaction does **not** atomically change Godot in-memory state or
+already-delivered RPCs.
+
+## Guarantees and deliberate limitations
+
+| Guaranteed by the current API | Not provided / not guaranteed |
+|---|---|
+| Named parameters for basic types (null/bool/int/float/String) | ORM, migrations, schema portability, automatic SQL dialect translation |
+| One session per native dispatcher worker | Connection pool, simultaneous SQL within one dispatcher |
+| Bounded pending requests and explicit rejection | Automatic retry, reconnect, or exactly-once effects |
+| Completed results via main-thread `poll()` | Automatic engine-independent timeout or in-flight cancellation |
+| Atomic SQL statement batches with row-count guards | Interactive long-lived async transactions |
+| Shutdown resolves waiting requests after joining worker | Nonblocking shutdown if a database call hangs |
+| Linux/Windows x86_64 build targets with packaged licenses | macOS, mobile, other CPU architectures |
+| Explicit `ok`/`error` result dictionaries | All SQL types (BLOB, typed JSONB, arrays, UUIDs) |
+
+**Important:** results capped by `max_rows` are not memory-bounded.
+`stop()` can block indefinitely during a hung driver call unless connection
+and SQL timeouts are configured externally. Errors after a network failure do
+not prove whether a standalone mutation was committed. Transaction batches
+expose `outcome_unknown` for a failure at COMMIT.
+
+For production PostgreSQL, configure `connect_timeout` and database
+`statement_timeout`/`lock_timeout`. For concurrent SQLite connections,
+enable WAL and configure `PRAGMA busy_timeout` separately **per connection**.
+WAL supports concurrent readers with a writer, *not multiple writers
+executing simultaneously*.
+
+**Never put database credentials in an untrusted Godot multiplayer client.**
+Use this addon in the authoritative server process.
+
+## Build from source
+
+Prerequisites: CMake 3.23+, C++17 toolchain, Git, Python 3, SQLite development
+libraries and (for PostgreSQL) `libpq` development libraries. CMake fetches
+pinned SOCI and `godot-cpp` source revisions.
 
 ```bash
 sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev
@@ -29,153 +153,19 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_
 cmake --build build --parallel 4
 ```
 
-Local Windows builds require an appropriate MSVC/vcpkg setup; automated Windows packaging is handled by `.github/workflows/release.yml`. Native binaries are written to `addons/godot_soci/bin/<platform>/` and the `soci.gdextension` manifest requires Godot 4.7+.
+The release workflow (`.github/workflows/release.yml`) uses pinned vcpkg
+dependencies to produce statically linked SQL libraries for Linux and Windows,
+with Godot 4.7.2 package smoke tests. It generates a combined addon ZIP. After
+merging, pushing a tag like `v0.3.1` triggers a **prerelease** only when both
+platform builds and checks pass.
 
-Copy `addons/godot_soci/` into another project's `res://addons/`, including native binaries and required runtime libraries (e.g. `libpq`). The extension loads automatically; there is no EditorPlugin to enable.
-
-## Installable release ZIPs
-
-The `Package Godot 4.7 addon` workflow builds two Godot-compatible binaries
-(debug and release) per platform on Ubuntu 22.04 and Windows 2022, using pinned
-vcpkg dependencies. The Windows `template_debug` and `template_release`
-variants are both compiled against the redistributable Release CRT (/MD);
-no Visual Studio Debug CRT is required to load the editor-side extension. The workflow statically links libpq, SQLite and required
-native libraries (the packaging job verifies Linux linkage), gathers third-party
-license notices and tests a packaged addon in a clean Godot 4.7.2 project.
-
-To try a release candidate, open GitHub Actions and run the packaging workflow
-manually, or inspect its artifacts on the release PR. Download
-`godot-soci-installable`, extract its ZIP, then copy `addons/godot_soci/` into
-your Godot project. Debug and release binaries are included.
-
-**Tagging after merging:** a tag like `v0.3.1` pushed on `main`
-triggers the same checks and, only if both platforms pass, publishes
-`godot-soci-v0.3.1.zip` as a prerelease on GitHub Releases.
-
-There is no `plugin.cfg` or EditorPlugin activation step. The package is a
-GDExtension (Godot 4.7+), not a standalone application. The extension still
-does not support macOS, Android, iOS, or non-x86_64 builds. Keep PostgreSQL
-credentials exclusively on the trusted game server. Linux binaries target
-Ubuntu 22.04-era glibc or newer; older distributions are not guaranteed.
-
-## Example
-
-```gdscript
-var db := GodotSociDatabase.new()
-if not db.open("sqlite3", ProjectSettings.globalize_path("user://example.db")):
-    push_error(db.get_last_error())
-    return
-
-db.execute("CREATE TABLE IF NOT EXISTS players(id BIGINT PRIMARY KEY, name TEXT)")
-var inserted := db.execute("INSERT INTO players(id, name) VALUES(:id, :name)", {"id": 42, "name": "Archer"})
-var result := db.query("SELECT id, name FROM players WHERE id=:id", {"id": 42})
-if result["ok"]:
-    print(result["rows"])
-db.close()
-```
-
-You can also instantiate `SociDatabase.new()` for the equivalent thin GDScript wrapper API. **Both APIs are synchronous** and may block the caller; keep slow SQL away from gameplay frames. For off-thread use, create/open/use/close a separate instance inside each worker thread; see `demo/sqlite/threaded.gd`.
-
-Use the explicit transaction methods; `execute("BEGIN")` bypasses the native transaction-state flag. A failed commit has an unknown outcome and must not be blindly retried for currency/item transfers.
-
-## Async usage (v0.2)
-
-The native `SociQueryDispatcher` runs a single long-lived C++ worker on a dedicated database session. `SociQueryRequest` exposes `is_done()`, `get_result()` and the `completed(result)` signal. **It does not require an additional Godot worker thread.**
-
-For a convenient GDScript `await` API, create a `SociAsyncDatabase` node and **add it to the SceneTree**. The node calls `dispatcher.poll()` every frame to deliver results on the main thread.
-
-```gdscript
-var db := SociAsyncDatabase.new()
-add_child(db)
-if not db.start("sqlite3", ProjectSettings.globalize_path("user://example.db")):
-    push_error(db.get_last_error())
-    return
-
-var inserted: Dictionary = await db.execute_async(
-    "INSERT INTO players(id, name) VALUES (:id, :name)",
-    {"id": 42, "name": "Archer"}
-)
-var selected: Dictionary = await db.query_async(
-    "SELECT id, name FROM players WHERE id=:id", {"id": 42}
-)
-if selected.ok:
-    print(selected.rows)
-db.stop()
-db.queue_free()
-```
-
-`start()` schedules connection setup on the worker; it does **not** guarantee the database is reachable. A connection failure appears in the completed request's error. A request submitted at capacity is rejected immediately (native API returns `null`; the GDScript wrapper returns an `ok=false` Dictionary). `max_pending` defaults to 128 and includes running/completed-but-not-polled requests.
-
-**Limits:** one worker per dispatcher, atomic transaction batches but no long-lived interactive transaction handles, no query cancellation or universal query timeout. `stop()` waits for any active blocking database call to finish. Configure DB/driver-side timeouts before relying on shutdown during network failures. Explicit transactions remain available through the synchronous connection API.
-
-## Atomic async transaction batches
-
-For small MMO operations that must either all commit or all roll back, use
-`transaction_async()`. The entire batch runs as one queued job on one SOCI
-session; unrelated requests cannot execute between its statements.
-
-```gdscript
-var outcome: Dictionary = await db.transaction_async([
-    {"sql": "UPDATE wallets SET yang = yang - :amount WHERE id=:id AND yang >= :amount",
-     "params": {"amount": 100, "id": 10}, "expected_affected_rows": 1},
-    {"sql": "UPDATE wallets SET yang = yang + :amount WHERE id=:id",
-     "params": {"amount": 100, "id": 20}, "expected_affected_rows": 1}
-])
-if not outcome.ok:
-    if outcome.get("outcome_unknown", false):
-        push_error("Commit outcome unknown; reconcile before retrying")
-    else:
-        push_error(outcome.error)
-```
-
-Each entry requires `sql`, with optional `params: Dictionary` and
-`expected_affected_rows: int`. A mismatch aborts and rolls back the entire
-batch. Supported statements should be non-returning SQL (DML); do not embed
-transaction control or `RETURNING`. Commit failures can have an unknown outcome,
-which is explicitly flagged. Use durable operation IDs/idempotency in a real
-game economy and do **not** retry an unknown commit blindly.
-
-For individual asynchronous statements use `query_async()` and
-`execute_async()`. The batch feature is intentionally **not** a long-lived
-transaction handle. If you need dynamic decisions between statements, use
-an explicit single-session transactional service instead.
-
-### Timeouts and shutdown
-
-`stop()` joins the database worker and may block if a driver call hangs. For
-PostgreSQL configure `connect_timeout` in the libpq connection string and
-database-side `statement_timeout` / `lock_timeout` as appropriate. For
-SQLite configure `PRAGMA busy_timeout` to bound lock waits; it does not cap
-query execution time. These are backend-specific mitigations, **not** a
-universal timeout or safe query cancellation facility.
-
-## Demos and tests
-
-```bash
-export GODOT_BIN=godot
-bash scripts/run_demos.sh
-bash scripts/run_tests.sh
-```
-
-To enable local PostgreSQL tests using a disposable database:
-
-```bash
-docker compose -f demo/postgresql/docker-compose.yml up -d --wait
-export GODOT_SOCI_PG='host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo'
-bash scripts/run_tests.sh
-docker compose -f demo/postgresql/docker-compose.yml down -v
-```
-
-Demos: `demo/sqlite/basic.gd`, `demo/sqlite/threaded.gd`, `demo/postgresql/basic.gd`. Tests: `tests/sqlite_test.gd`, `tests/postgresql_test.gd`.
-
-## Roadmap / limitations
-
-v0.3 does **not** provide multi-worker connection pooling, interactive async transaction handles, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
-
-The v0.3 native request/worker/dispatcher provide a single-worker foundation plus atomic transaction batches. Multi-worker pooling requires transaction affinity and lifecycle tests. See `docs/ARCHITECTURE.md`.
-
-SOCI does not abstract SQL dialects or migrations. Never distribute production database credentials with a game client or send raw database errors to untrusted multiplayer users.
+Run [integration tests](docs/TESTING.md) before proposing a release. Linux
+tests use PostgreSQL in Docker; Windows packaging tests use the PostgreSQL
+instance preinstalled on GitHub's Windows 2022 runner.
 
 ## License
 
-The wrapper is MIT-licensed (`LICENSE`). SOCI uses the Boost Software License 1.0, and godot-cpp is MIT. Preserve required third-party notices when distributing binaries and bundled dependencies. See `docs/UPSTREAM.md`.
+The GDExtension wrapper is MIT-licensed ([LICENSE](LICENSE)). SOCI uses the
+Boost Software License 1.0 and `godot-cpp` uses MIT. The installable archive
+includes relevant third-party license notices and source licensing remains
+documented in [docs/UPSTREAM.md](docs/UPSTREAM.md).

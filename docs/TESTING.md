@@ -31,13 +31,18 @@ isolated packaged-addon smoke test and assembles ZIPs. It does not substitute
 for the Windows integration workflow. Both CI workflows must pass before
 publishing an addon.
 
-To avoid three expensive native builds per commit, a normal PR runs only
-lightweight release validation; full release packaging runs on a tag or via
-Actions → Package Godot 4.7 addon → Run workflow. For pre-merge packaging
-verification, add the `full-release` label to the PR (remove and re-add
-after further source changes if you want to rerun it). The label is an
-**opt-in**; it does not publish a release. The PostgreSQL user/password are test-only defaults of
-the ephemeral hosted Windows runner.
+The complete release workflow runs automatically on **every pull request**
+and push to `main`, in addition to version tags and manual runs. It builds
+debug and release GDExtension binaries for both Windows and Linux, smoke-tests
+each installable platform ZIP in a clean Godot project, and checks the merged
+cross-platform ZIP. It uses binary vcpkg caches and a Linux compiler cache to
+reduce repeated work. Separate Windows/Linux runtime-integration jobs continue
+to test the SQL backends directly.
+
+Only a successful `v*` tag can publish a **GitHub prerelease**; pull requests
+and ordinary `main` pushes produce downloadable workflow artifacts, never a
+public release. The PostgreSQL user/password used by Windows integration are
+test-only defaults of the ephemeral hosted runner.
 
 The Windows service is runner-specific. On your own machine, configure
 `GODOT_SOCI_PG` to a disposable local PostgreSQL database and adjust

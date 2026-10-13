@@ -2,18 +2,10 @@ name: Package Godot 4.7 addon
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
-    paths:
-      - '.github/workflows/release.yml'
-      - 'CMakeLists.txt'
-      - 'addons/godot_soci/**'
-      - 'scripts/package_addon.py'
-      - 'scripts/smoke_release.py'
-      - 'README.md'
-      - 'docs/**'
-  workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -37,8 +29,7 @@ jobs:
           python3 scripts/package_addon.py --help
 
   build:
-    # Full build on manual/tag requests, or PR opt-in via full-release label.
-    if: github.event_name != 'pull_request' || (github.event.action == 'labeled' && github.event.label.name == 'full-release')
+    # Build and smoke-test both platforms on every PR, main push and tag.
     name: Native binaries (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 100

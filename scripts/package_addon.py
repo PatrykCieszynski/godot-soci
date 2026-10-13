@@ -35,6 +35,17 @@ def manifest_paths() -> set[str]:
     return {value.strip('"').removeprefix("./") for value in parser["libraries"].values()}
 
 
+def normalize_entry(name: str, data: bytes) -> bytes:
+    """Canonicalize text line endings across Windows and Linux packages.
+
+    Platform-specific native binaries must remain byte-for-byte unchanged.
+    Actual differences in text contents must still fail the merge.
+    """
+    if name.endswith((".gd", ".gdextension", ".md", ".txt")) or name.endswith("/LICENSE"):
+        return data.replace(b"\r\n", b"\n")
+    return data
+
+
 def write_zip(output: Path, entries: dict[str, bytes]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -61,13 +72,13 @@ def build_platform(args: argparse.Namespace) -> None:
 
     entries: dict[str, bytes] = {}
     for name in ("soci.gdextension", "database.gd", "async_database.gd", "README.md"):
-        entries[addon_path(name)] = (ADDON / name).read_bytes()
-    entries[addon_path("LICENSE")] = (ROOT / "LICENSE").read_bytes()
+        entries[addon_path(name)] = normalize_entry(name, (ADDON / name).read_bytes())
+    entries[addon_path("LICENSE")] = normalize_entry("LICENSE", (ROOT / "LICENSE").read_bytes())
 
     # Keep API docs available inside the installable ZIP rather than linking
     # to repository-only docs that users do not download.
     for name in ("API.md", "TESTING.md"):
-        entries[addon_path(f"docs/{name}")] = (ROOT / "docs" / name).read_bytes()
+        entries[addon_path(f"docs/{name}")] = normalize_entry(name, (ROOT / "docs" / name).read_bytes())
 
     for binary in expected:
         entries[addon_path(binary)] = (ADDON / binary).read_bytes()
@@ -79,7 +90,7 @@ def build_platform(args: argparse.Namespace) -> None:
     ):
         if not path.is_file():
             raise RuntimeError(f"Missing upstream license: {path}")
-        entries[addon_path("licenses/" + name)] = path.read_bytes()
+        entries[addon_path("licenses/" + name)] = normalize_entry(name, path.read_bytes())
 
     share = Path(args.vcpkg_share)
     if not share.is_dir():
@@ -88,7 +99,7 @@ def build_platform(args: argparse.Namespace) -> None:
     for copyright_file in sorted(share.glob("*/copyright")):
         package = copyright_file.parent.name
         found.add(package)
-        entries[addon_path(f"licenses/vcpkg/{package}.txt")] = copyright_file.read_bytes()
+        entries[addon_path(f"licenses/vcpkg/{package}.txt")] = normalize_entry(f"{package}.txt", copyright_file.read_bytes())
     if not {"libpq", "sqlite3", "openssl"}.issubset(found):
         raise RuntimeError(f"Missing core vcpkg licenses; found: {sorted(found)}")
 
@@ -109,7 +120,7 @@ def combine(args: argparse.Namespace) -> None:
         archive_path = Path(getattr(args, platform))
         with zipfile.ZipFile(archive_path) as archive:
             for name in archive.namelist():
-                data = archive.read(name)
+                data = normalize_entry(name, archive.read(name))
                 if name in entries and entries[name] != data:
                     if name.startswith(addon_path("licenses/vcpkg/")):
                         # Package notices can differ between OS triplets; preserve both.

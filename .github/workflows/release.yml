@@ -17,7 +17,6 @@ permissions:
 jobs:
   validate:
     name: Fast workflow and source validation
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -27,8 +26,10 @@ jobs:
           python3 scripts/static_check.py
           python3 -m py_compile scripts/package_addon.py scripts/smoke_release.py
           python3 scripts/package_addon.py --help
+          python3 scripts/test_package_addon.py
 
   build:
+    needs: validate
     # Build and smoke-test both platforms on every PR, main push and tag.
     name: Native binaries (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}

@@ -5,7 +5,6 @@ extends SceneTree
 # overlap; no Godot objects are ever touched by the C++ workers.
 
 const WRITES_PER_WORKER := 48
-const READS := 24
 
 func _initialize() -> void:
     call_deferred("_run")
@@ -62,7 +61,7 @@ func _run() -> void:
     # Each SQLite connection needs its own lock wait timeout.
     var settings: Array = []
     for dispatcher in dispatchers:
-        settings.append(dispatcher.execute_async("PRAGMA busy_timeout=10000"))
+        settings.append(dispatcher.query_async("PRAGMA busy_timeout=10000"))
     if not _assert(await _wait_all(dispatchers, settings), "busy_timeout setup timed out"):
         return
     for request in settings:

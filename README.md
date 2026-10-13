@@ -12,7 +12,7 @@ production-certified persistence layer for a multiplayer game economy.
 
 ## Installation
 
-Download the **installable ZIP** from [GitHub Releases](../../releases)
+Download the **installable ZIP** from [GitHub Releases](https://github.com/PatrykCieszynski/godot-soci/releases)
 (after the release workflow succeeds). Extract the included
 `addons/godot_soci/` directory into your Godot project:
 

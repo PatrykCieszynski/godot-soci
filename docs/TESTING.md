@@ -29,7 +29,14 @@ scripts against real SQLite and PostgreSQL using `scripts/run_windows_tests.ps1`
 The release workflow still builds both debug and release binaries, runs an
 isolated packaged-addon smoke test and assembles ZIPs. It does not substitute
 for the Windows integration workflow. Both CI workflows must pass before
-publishing an addon. The PostgreSQL user/password are test-only defaults of
+publishing an addon.
+
+To avoid three expensive native builds per commit, a normal PR runs only
+lightweight release validation; full release packaging runs on a tag or via
+Actions → Package Godot 4.7 addon → Run workflow. For pre-merge packaging
+verification, add the `full-release` label to the PR (remove and re-add
+after further source changes if you want to rerun it). The label is an
+**opt-in**; it does not publish a release. The PostgreSQL user/password are test-only defaults of
 the ephemeral hosted Windows runner.
 
 The Windows service is runner-specific. On your own machine, configure

@@ -42,9 +42,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .ccache
-          key: godot-soci-linux-ccache-v1-${{ github.sha }}
-          restore-keys: |
-            godot-soci-linux-ccache-v1-
+          key: godot-soci-linux-ccache-v2-ubuntu24-${{ hashFiles('CMakeLists.txt') }}
       - name: Install Godot 4.7.2
         run: |
           mkdir -p .bin

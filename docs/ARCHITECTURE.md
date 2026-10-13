@@ -1,30 +1,46 @@
-# Architecture (v0.1.x)
+# Architecture (v0.2)
 
-The native `GodotSociDatabase` is a synchronous, single-owner wrapper. Each instance owns one SOCI session. The public GDScript `SociDatabase` wrapper delegates to it without changing thread-affinity guarantees.
+`GodotSociDatabase` remains the synchronous, single-owner SOCI connection. It is unchanged and supports explicit transactions.
 
-- Godot input is converted into typed SOCI parameters stored in a `std::deque` so bind addresses remain stable.
-- `query()` copies at most `max_rows` records into Godot dictionaries and reports truncation separately.
-- Duplicate output column names are rejected instead of silently overwriting a previous value. Use SQL aliases.
-- The session tracks explicit transactions via `begin()`, `begin_immediate()`, `commit()`, and `rollback()`. Use these methods, not `execute("BEGIN")`, because arbitrary SQL is not parsed to synchronize the transaction flag.
-- No implicit reconnects or automatic retries of transactions. A failed commit can have an unknown outcome.
+## Native async pipeline
 
-## Layout
+```text
+SociAsyncDatabase (Node, GDScript wrapper)
+  ├─ query_async()/execute_async() -> awaitable Dictionary
+  └─ _process() -> SociQueryDispatcher.poll()
+                       │ main thread
+                       ▼
+SociQueryDispatcher (RefCounted, native)
+  ├─ request table (retains SociQueryRequest until completion)
+  ├─ bounded queue of copied C++ Job structs
+  └─ std::thread + condition_variable
+                       │ background thread
+                       ▼
+QueryWorker (C++) -> soci::session -> SQLite/PostgreSQL
+                       │
+                       ▼
+Completion queue (copied C++ rows and scalars)
+                       │ main thread polling
+                       ▼
+SociQueryRequest.resolve(Dictionary) -> completed(result)
+```
 
-- `include/godot_soci/database.h` — native driver contract
-- `src/database.cpp` — synchronous SOCI implementation
-- `src/register_types.cpp` — Godot registration
-- `addons/godot_soci/` — installable addon, optional GDScript wrapper
-- `demo/sqlite/` and `demo/postgresql/` — manual demos, including a real Godot Thread example
-- `tests/` — headless Godot integration tests against real DB engines in Linux CI
+One worker owns one SOCI session. No Godot objects or Variants pass from the main thread to the worker; only std::string and plain C++ values cross the boundary.
 
-## v0.2: native async dispatcher
+`start()` launches the worker but connection setup runs asynchronously. If the connection cannot open, queued jobs resolve with errors. `pending()` counts running, queued and completed-but-not-delivered requests. When `max_pending` is reached, native `query_async()` / `execute_async()` return null and set `get_last_error()`. The GDScript wrapper translates this into an error Dictionary without yielding.
 
-Do not introduce placeholder worker/request translation units. When implementing async, add `src/query_request.cpp`, `src/query_worker.cpp` and matching public headers, with a real, independently tested request lifecycle.
+`SociQueryRequest` retains its `done` status and result for late inspection. The `completed` signal is emitted only when `poll()` runs on the main thread. A user who keeps a reference after completion should inspect `is_done()` before awaiting the signal. The convenience node handles normal immediate-await usage.
 
-1. Convert input to plain C++ data *before* enqueueing; do not pass live Godot scene objects to worker threads.
-2. Use a bounded request queue and long-lived DB workers, with one session owned per worker.
-3. Deliver completions on Godot's main thread; expose a request object that retains completion state (not just a one-shot signal).
-4. Handle shutdown, cancellation of queued work, DB timeouts, transaction/session affinity, and unknown commit outcomes.
-5. Keep the synchronous driver available for tools, migration scripts and explicit off-thread use.
+Stopping is **blocking**: it drops queued work and waits for an in-flight SOCI call to return before joining the thread. Completed requests retain their true database results even during shutdown; queued requests that never executed are resolved with a cancellation error on the main thread. A driver error during an in-flight mutation may still have an unknown database outcome: never blindly retry currency/item operations. This ensures sessions are destroyed on their owning worker but is not yet a solution for indefinitely hung network operations; configure database/driver timeouts.
 
-SOCI normalizes connection APIs, not SQL dialects. PostgreSQL and SQLite schema/locking behavior remains application-specific.
+## Deliberate v0.2 limitations
+
+- Single worker per dispatcher, no parallel SQL within one dispatcher.
+- No async transaction commands or session-pinned transaction handles. The synchronous driver remains available for transactional operations on an explicitly owned connection.
+- No driver-independent SQL cancellation, reconnect/retry, or query timeout.
+- Results are bounded by `max_rows`, but individual row sizes are not capped.
+- SQL dialects, migrations and isolation levels remain backend-specific.
+
+## Next phase
+
+Before implementing a multi-worker pool, define the API for transaction/session affinity (e.g. a transaction handle pinned to one worker), driver-specific cancellation/timeouts and controlled shutdown. Add stress tests for concurrent producer requests, abandoned awaiters, per-worker connection failures and DB disconnects. Do not assume adding worker threads alone makes a correct connection pool.

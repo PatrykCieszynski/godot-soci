@@ -27,7 +27,7 @@ assert 'GODOTCPP_API_VERSION "4.7"' in cmake
 assert 'compatibility_minimum = "4.7"' in manifest
 assert "Duplicate SQL result column name" in source
 assert "src/database.cpp" in cmake
-assert "include/godot_soci" in cmake
+assert "target_include_directories(godot_soci PRIVATE src include)" in cmake
 for path in (root / "demo").rglob("*.gd"):
     assert "\t" not in path.read_text(), path
 print("STATIC SOURCE LAYOUT PASS (not a substitute for Godot integration tests)")

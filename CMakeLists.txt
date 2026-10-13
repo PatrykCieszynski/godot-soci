@@ -13,6 +13,15 @@ set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for godot-cpp")
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(Threads REQUIRED)
 
+# Match vcpkg x64-windows-static-md: statically linked SQL libraries still use
+# the *dynamic* MSVC CRT. godot-cpp defaults to static CRT, causing LNK20xx.
+if(MSVC)
+    set(GODOTCPP_USE_STATIC_CPP OFF CACHE BOOL "Use dynamic MSVC CRT" FORCE)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+        CACHE STRING "Match vcpkg /MD(d) CRT for every C++ target" FORCE)
+endif()
+
 FetchContent_Declare(godot_cpp
     GIT_REPOSITORY https://github.com/godotengine/godot-cpp.git
     GIT_TAG ${GODOT_SOCI_GODOT_CPP_REF}

@@ -3,6 +3,7 @@
 #include "godot_soci/query_request.h"
 #include "godot_soci/query_worker.h"
 
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/string.hpp>

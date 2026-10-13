@@ -55,6 +55,20 @@ func _run() -> void:
     if not _check(request.is_done() and request.get_result().get("ok", false), "manual poll and retained completion"):
         return
     raw.stop()
+
+    var shutdown_dispatcher := SociQueryDispatcher.new()
+    if not _check(shutdown_dispatcher.start("sqlite3", path), "shutdown dispatcher start"):
+        return
+    var shutdown_request: SociQueryRequest = shutdown_dispatcher.query_async("SELECT 1 AS value")
+    if not _check(shutdown_request != null, "shutdown request created"):
+        return
+    shutdown_dispatcher.stop()
+    if not _check(shutdown_request.is_done(), "shutdown settles outstanding requests"):
+        return
+    var shutdown_result: Dictionary = shutdown_request.get_result()
+    if not _check(shutdown_result.has("ok"), "shutdown retained result"):
+        return
+
     db.stop()
     if not _check(db.pending() == 0, "clean shutdown"):
         return

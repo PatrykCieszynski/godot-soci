@@ -31,7 +31,7 @@ One worker owns one SOCI session. No Godot objects or Variants pass from the mai
 
 `SociQueryRequest` retains its `done` status and result for late inspection. The `completed` signal is emitted only when `poll()` runs on the main thread. A user who keeps a reference after completion should inspect `is_done()` before awaiting the signal. The convenience node handles normal immediate-await usage.
 
-Stopping is **blocking**: it drops queued work and waits for an in-flight SOCI call to return before joining the thread. Outstanding request objects are resolved with a cancellation error on the main thread. This ensures sessions are destroyed on their owning worker but is not yet a solution for indefinitely hung network operations; configure database/driver timeouts.
+Stopping is **blocking**: it drops queued work and waits for an in-flight SOCI call to return before joining the thread. Completed requests retain their true database results even during shutdown; queued requests that never executed are resolved with a cancellation error on the main thread. A driver error during an in-flight mutation may still have an unknown database outcome: never blindly retry currency/item operations. This ensures sessions are destroyed on their owning worker but is not yet a solution for indefinitely hung network operations; configure database/driver timeouts.
 
 ## Deliberate v0.2 limitations
 

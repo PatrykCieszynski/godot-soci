@@ -2,7 +2,7 @@
 
 An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing synchronous and asynchronous SQLite/PostgreSQL APIs to GDScript.
 
-> **Status: v0.3 preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
+> **Status: v0.3.1 preview.** Under active validation; avoid using it for production payments or game economies without further testing. Installable ZIP artifacts are produced by the release workflow for Linux and Windows x86_64. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
 
 ## Features
 
@@ -25,9 +25,32 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_
 cmake --build build --parallel 4
 ```
 
-Windows requires an appropriate MSVC/vcpkg setup; automated Windows builds remain a future task. Native binaries are written to `addons/godot_soci/bin/<platform>/` and the `soci.gdextension` manifest requires Godot 4.7+.
+Local Windows builds require an appropriate MSVC/vcpkg setup; automated Windows packaging is handled by `.github/workflows/release.yml`. Native binaries are written to `addons/godot_soci/bin/<platform>/` and the `soci.gdextension` manifest requires Godot 4.7+.
 
 Copy `addons/godot_soci/` into another project's `res://addons/`, including native binaries and required runtime libraries (e.g. `libpq`). The extension loads automatically; there is no EditorPlugin to enable.
+
+## Installable release ZIPs
+
+The `Package Godot 4.7 addon` workflow builds two Godot-compatible binaries
+(debug and release) per platform on Ubuntu 22.04 and Windows 2022, using pinned
+vcpkg dependencies. The workflow statically links libpq, SQLite and required
+native libraries (the packaging job verifies Linux linkage), gathers third-party
+license notices and tests a packaged addon in a clean Godot 4.7.2 project.
+
+To try a release candidate, open GitHub Actions and run the packaging workflow
+manually, or inspect its artifacts on the release PR. Download
+`godot-soci-installable`, extract its ZIP, then copy `addons/godot_soci/` into
+your Godot project. Debug and release binaries are included.
+
+**Tagging after merging:** a tag like `v0.3.1` pushed on `main`
+triggers the same checks and, only if both platforms pass, publishes
+`godot-soci-v0.3.1.zip` as a prerelease on GitHub Releases.
+
+There is no `plugin.cfg` or EditorPlugin activation step. The package is a
+GDExtension (Godot 4.7+), not a standalone application. The extension still
+does not support macOS, Android, iOS, or non-x86_64 builds. Keep PostgreSQL
+credentials exclusively on the trusted game server. Linux binaries target
+Ubuntu 22.04-era glibc or newer; older distributions are not guaranteed.
 
 ## Example
 

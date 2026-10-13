@@ -1,4 +1,4 @@
-# Architecture (v0.2)
+# Architecture (v0.3)
 
 `GodotSociDatabase` remains the synchronous, single-owner SOCI connection. It is unchanged and supports explicit transactions.
 
@@ -33,10 +33,23 @@ One worker owns one SOCI session. No Godot objects or Variants pass from the mai
 
 Stopping is **blocking**: it drops queued work and waits for an in-flight SOCI call to return before joining the thread. Completed requests retain their true database results even during shutdown; queued requests that never executed are resolved with a cancellation error on the main thread. A driver error during an in-flight mutation may still have an unknown database outcome: never blindly retry currency/item operations. This ensures sessions are destroyed on their owning worker but is not yet a solution for indefinitely hung network operations; configure database/driver timeouts.
 
-## Deliberate v0.2 limitations
+## Atomic transaction batches (v0.3 increment)
+
+A batch request contains immutable C++ statements with copied parameter values.
+The worker uses a single `soci::transaction`, executing each non-returning
+statement in order. Optional `expected_affected_rows` guards can abort before
+commit if a conditional balance/item update affected fewer rows than expected.
+The transaction destructor handles rollback on ordinary statement errors.
+`outcome_unknown=true` is reserved for an exception when attempting to commit;
+the client must reconcile rather than retry an economy mutation.
+
+This avoids session-affinity problems from interleaving a long-lived transaction
+with unrelated jobs. Long-lived interactive transactions remain unsupported.
+
+## Deliberate v0.3 limitations
 
 - Single worker per dispatcher, no parallel SQL within one dispatcher.
-- No async transaction commands or session-pinned transaction handles. The synchronous driver remains available for transactional operations on an explicitly owned connection.
+- Supports atomic async batches, but not long-lived interactive transactions or session-pinned transaction handles. The synchronous driver remains available for complex transactional operations on an explicitly owned connection.
 - No driver-independent SQL cancellation, reconnect/retry, or query timeout.
 - Results are bounded by `max_rows`, but individual row sizes are not capped.
 - SQL dialects, migrations and isolation levels remain backend-specific.

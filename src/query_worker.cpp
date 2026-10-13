@@ -141,6 +141,36 @@ Completion QueryWorker::run(const Job &job, soci::session &session) {
     result.id = job.id;
     result.query = job.query;
     try {
+        if (job.transaction) {
+            result.transaction = true;
+            soci::transaction tx(session);
+            for (size_t index = 0; index < job.statements.size(); ++index) {
+                const BatchStatement &command = job.statements[index];
+                std::deque<Binding> stored;
+                soci::statement statement(session);
+                statement.alloc();
+                statement.prepare(command.sql);
+                bind_arguments(statement, command.params, stored);
+                statement.define_and_bind();
+                statement.execute(true);
+                const int64_t affected = static_cast<int64_t>(statement.get_affected_rows());
+                if (command.expected_affected_rows >= 0 && affected != command.expected_affected_rows) {
+                    throw std::runtime_error("Affected-row precondition failed at transaction statement " +
+                                             std::to_string(index) + ".");
+                }
+                result.affected_rows += affected;
+                result.affected_rows_per_statement.push_back(affected);
+            }
+            try {
+                tx.commit();
+            } catch (...) {
+                // Commit may have reached the database before the transport failed.
+                result.outcome_unknown = true;
+                throw;
+            }
+            result.ok = true;
+            return result;
+        }
         std::deque<Binding> bindings;
         soci::row record;
         soci::statement statement(session);
@@ -162,6 +192,11 @@ Completion QueryWorker::run(const Job &job, soci::session &session) {
         }
         result.ok = true;
     } catch (const std::exception &error) {
+        if (job.transaction && !result.outcome_unknown) {
+            // An uncommitted batch rolled back; do not report provisional row counts.
+            result.affected_rows = 0;
+            result.affected_rows_per_statement.clear();
+        }
         result.error = redact(error.what());
     }
     return result;

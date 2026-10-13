@@ -51,3 +51,13 @@ func execute_async(sql: String, params: Dictionary = {}) -> Dictionary:
     if request.is_done():
         return request.get_result()
     return await request.completed
+
+
+func transaction_async(statements: Array) -> Dictionary:
+    var request := _dispatcher.transaction_async(statements)
+    if request == null:
+        return {"ok": false, "error": _dispatcher.get_last_error(), "outcome_unknown": false,
+            "affected_rows": 0, "affected_rows_per_statement": []}
+    if request.is_done():
+        return request.get_result()
+    return await request.completed

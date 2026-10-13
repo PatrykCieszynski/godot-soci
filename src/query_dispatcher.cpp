@@ -18,6 +18,7 @@
 #include <regex>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace godot {
 namespace {
@@ -95,7 +96,13 @@ Dictionary as_dictionary(const godot_soci::Completion &completed) {
     Dictionary result;
     result["ok"] = completed.ok;
     result["error"] = to_godot(completed.error);
-    if (completed.query) {
+    if (completed.transaction) {
+        Array counts;
+        for (int64_t value : completed.affected_rows_per_statement) counts.append(value);
+        result["affected_rows"] = completed.affected_rows;
+        result["affected_rows_per_statement"] = counts;
+        result["outcome_unknown"] = completed.outcome_unknown;
+    } else if (completed.query) {
         Array rows;
         for (const auto &record : completed.rows) {
             Dictionary row;
@@ -123,6 +130,8 @@ void SociQueryDispatcher::_bind_methods() {
                          &SociQueryDispatcher::query_async, DEFVAL(Dictionary()), DEFVAL(1000));
     ClassDB::bind_method(D_METHOD("execute_async", "sql", "params"),
                          &SociQueryDispatcher::execute_async, DEFVAL(Dictionary()));
+    ClassDB::bind_method(D_METHOD("transaction_async", "statements"),
+                         &SociQueryDispatcher::transaction_async);
     ClassDB::bind_method(D_METHOD("poll", "max_completions"), &SociQueryDispatcher::poll, DEFVAL(64));
 }
 
@@ -220,6 +229,93 @@ Ref<SociQueryRequest> SociQueryDispatcher::execute_async(const String &sql, cons
     return submit(false, sql, params, 0);
 }
 
+Ref<SociQueryRequest> SociQueryDispatcher::transaction_async(const Array &statements) {
+    if (!started_) {
+        last_error_ = "Dispatcher is not started.";
+        return {};
+    }
+    if (requests_.size() >= max_pending_) {
+        last_error_ = "Async dispatcher capacity exceeded (backpressure).";
+        return {};
+    }
+    if (statements.is_empty() || statements.size() > 128) {
+        last_error_ = "Transaction requires between 1 and 128 statements.";
+        return {};
+    }
+
+    godot_soci::Job job;
+    job.id = next_id_++;
+    job.transaction = true;
+    try {
+        for (int index = 0; index < statements.size(); ++index) {
+            const Variant item = statements[index];
+            if (item.get_type() != Variant::DICTIONARY) {
+                throw std::invalid_argument("Transaction statements must be dictionaries.");
+            }
+            Dictionary descriptor = item;
+            if (!descriptor.has("sql") || descriptor["sql"].get_type() != Variant::STRING) {
+                throw std::invalid_argument("Each transaction statement requires an SQL string.");
+            }
+
+            godot_soci::BatchStatement command;
+            command.sql = utf8(static_cast<String>(descriptor["sql"]));
+            if (command.sql.empty()) {
+                throw std::invalid_argument("Transaction SQL must not be empty.");
+            }
+            // Transaction boundaries belong to the native batch, not user SQL.
+            const auto first = command.sql.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos) throw std::invalid_argument("Transaction SQL must not be blank.");
+            std::string prefix = command.sql.substr(first, command.sql.find_first_of(" \t\r\n;(", first) - first);
+            for (char &ch : prefix) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            if (prefix == "BEGIN" || prefix == "COMMIT" || prefix == "ROLLBACK" ||
+                prefix == "SAVEPOINT" || prefix == "RELEASE" || prefix == "START") {
+                throw std::invalid_argument("Transaction-control SQL is not allowed inside a batch.");
+            }
+
+            if (descriptor.has("expected_affected_rows")) {
+                if (descriptor["expected_affected_rows"].get_type() != Variant::INT) {
+                    throw std::invalid_argument("expected_affected_rows must be an integer.");
+                }
+                command.expected_affected_rows = static_cast<int64_t>(descriptor["expected_affected_rows"]);
+                if (command.expected_affected_rows < 0) {
+                    throw std::invalid_argument("expected_affected_rows must be non-negative.");
+                }
+            }
+
+            const Variant parameters = descriptor.get("params", Dictionary());
+            if (parameters.get_type() != Variant::DICTIONARY) {
+                throw std::invalid_argument("Transaction params must be a Dictionary.");
+            }
+            Dictionary params = parameters;
+            Array keys = params.keys();
+            for (int p = 0; p < keys.size(); ++p) {
+                if (keys[p].get_type() != Variant::STRING) {
+                    throw std::invalid_argument("SQL bind keys must be strings.");
+                }
+                godot_soci::Parameter parameter;
+                parameter.name = checked_key(static_cast<String>(keys[p]));
+                parameter.value = copy_parameter(params[keys[p]]);
+                command.params.push_back(std::move(parameter));
+            }
+            job.statements.push_back(std::move(command));
+        }
+    } catch (const std::exception &error) {
+        last_error_ = to_godot(error.what());
+        return {};
+    }
+
+    Ref<SociQueryRequest> request;
+    request.instantiate();
+    requests_.emplace(job.id, request);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push_back(std::move(job));
+    }
+    wake_.notify_one();
+    last_error_ = "";
+    return request;
+}
+
 void SociQueryDispatcher::worker_main(std::string backend, std::string connection) {
     std::unique_ptr<soci::session> session;
     std::string connection_error;
@@ -251,6 +347,7 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
         } else {
             completed.id = job.id;
             completed.query = job.query;
+            completed.transaction = job.transaction;
             completed.error = connection_error.empty() ? "Database unavailable." : connection_error;
         }
         {
@@ -270,16 +367,19 @@ int SociQueryDispatcher::poll(int max_completions) {
             completions_.pop_front();
         }
     }
-    int count = 0;
+    // Remove all completed requests before emitting signals. A callback can
+    // re-enter stop(), and must never cancel another already-finished request.
+    std::vector<std::pair<Ref<SociQueryRequest>, Dictionary>> ready;
+    ready.reserve(delivered.size());
     for (const auto &completed : delivered) {
         auto it = requests_.find(completed.id);
         if (it == requests_.end()) continue;
         Ref<SociQueryRequest> request = it->second;
         requests_.erase(it);
-        request->resolve(as_dictionary(completed));
-        ++count;
+        ready.emplace_back(request, as_dictionary(completed));
     }
-    return count;
+    for (auto &entry : ready) entry.first->resolve(entry.second);
+    return static_cast<int>(ready.size());
 }
 
 void SociQueryDispatcher::stop() {
@@ -319,6 +419,11 @@ void SociQueryDispatcher::stop() {
     Dictionary cancelled;
     cancelled["ok"] = false;
     cancelled["error"] = "Async database dispatcher stopped before request completion.";
+    cancelled["outcome_unknown"] = false;
+    cancelled["affected_rows"] = int64_t(0);
+    cancelled["affected_rows_per_statement"] = Array();
+    cancelled["rows"] = Array();
+    cancelled["truncated"] = false;
     for (auto &entry : outstanding) entry.second->resolve(cancelled);
     stopping_ = false;
 }

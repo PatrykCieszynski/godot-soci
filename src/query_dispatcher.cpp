@@ -131,7 +131,7 @@ SociQueryDispatcher::~SociQueryDispatcher() {
 }
 
 bool SociQueryDispatcher::start(const String &backend, const String &connection, int max_pending) {
-    if (started_ || worker_.joinable()) {
+    if (started_ || worker_.joinable() || stopping_) {
         last_error_ = "Dispatcher is already started.";
         return false;
     }
@@ -283,7 +283,7 @@ int SociQueryDispatcher::poll(int max_completions) {
 }
 
 void SociQueryDispatcher::stop() {
-    if (!started_ && !worker_.joinable()) return;
+    if (stopping_ || (!started_ && !worker_.joinable())) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
@@ -291,21 +291,36 @@ void SociQueryDispatcher::stop() {
     }
     wake_.notify_all();
 
-    // Blocking: an active database call must finish before its owning session is destroyed.
+    // A running database operation must finish before its session is destroyed.
+    // This can block when a driver has no configured query/network timeout.
     if (worker_.joinable()) worker_.join();
+    started_ = false;
 
+    std::deque<godot_soci::Completion> finished;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        completions_.clear();
+        finished.swap(completions_);
     }
-    started_ = false;
-    // Detach all requests before signals fire: callbacks may re-enter this object.
+
+    // Preserve real outcomes of finished requests, especially mutations.
+    // Dropping a committed INSERT/UPDATE result here could cause unsafe retries.
+    for (const auto &completed : finished) {
+        auto it = requests_.find(completed.id);
+        if (it == requests_.end()) continue;
+        Ref<SociQueryRequest> request = it->second;
+        requests_.erase(it);
+        request->resolve(as_dictionary(completed));
+    }
+
+    // Requests that never finished are canceled. Their statements were not
+    // executed, except for a driver operation interrupted by external failure.
     auto outstanding = std::move(requests_);
     requests_.clear();
     Dictionary cancelled;
     cancelled["ok"] = false;
-    cancelled["error"] = "Async database dispatcher stopped.";
+    cancelled["error"] = "Async database dispatcher stopped before request completion.";
     for (auto &entry : outstanding) entry.second->resolve(cancelled);
+    stopping_ = false;
 }
 
 } // namespace godot

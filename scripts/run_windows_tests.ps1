@@ -2,6 +2,18 @@ param([Parameter(Mandatory = $true)][string] $Godot)
 
 $ErrorActionPreference = 'Stop'
 
+# Godot must not scan vcpkg/buildtrees/CMake output as project resources.
+# Test the compiled extension inside a fresh, minimal Godot project.
+$script:TestProject = Join-Path $env:RUNNER_TEMP 'godot-soci-integration'
+if (Test-Path $script:TestProject) {
+    Remove-Item -LiteralPath $script:TestProject -Force -Recurse
+}
+New-Item -ItemType Directory -Force -Path $script:TestProject | Out-Null
+Copy-Item -LiteralPath 'project.godot' -Destination $script:TestProject
+Copy-Item -LiteralPath 'addons' -Destination (Join-Path $script:TestProject 'addons') -Recurse
+Copy-Item -LiteralPath 'tests' -Destination (Join-Path $script:TestProject 'tests') -Recurse
+Write-Host "Windows native CI project: $script:TestProject"
+
 function Invoke-GodotBounded {
     param(
         [Parameter(Mandatory = $true)][string[]] $Arguments,
@@ -14,7 +26,7 @@ function Invoke-GodotBounded {
     $process = $null
     try {
         Write-Host "::group::Godot: $Label"
-        $process = Start-Process -FilePath $Godot -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+        $process = Start-Process -FilePath $Godot -ArgumentList $Arguments -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err -WorkingDirectory $script:TestProject
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $process.Kill()
             $process.WaitForExit()

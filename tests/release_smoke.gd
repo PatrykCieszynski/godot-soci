@@ -28,7 +28,7 @@ func _run() -> void:
         return
     native_db.close()
 
-    var wrapper: Node = load("res://addons/godot_soci/async_database.gd").new()
+    var wrapper := SociAsyncDatabase.new()
     root.add_child(wrapper)
     if not wrapper.start("sqlite3", ":memory:"):
         _failure("Async database start: " + wrapper.get_last_error())

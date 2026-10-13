@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   linux:
     runs-on: ubuntu-24.04
@@ -26,12 +30,19 @@ jobs:
           --health-retries 10
     env:
       GODOT_SOCI_PG: "host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo"
+      CCACHE_DIR: "${{ github.workspace }}/.ccache"
+      CCACHE_MAXSIZE: 750M
     steps:
       - uses: actions/checkout@v6
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev unzip curl gdb
+          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev unzip curl gdb ccache
+      - name: Reuse compiled godot-cpp and SOCI objects
+        uses: actions/cache@v5
+        with:
+          path: .ccache
+          key: godot-soci-linux-ccache-v2-ubuntu24-${{ hashFiles('CMakeLists.txt') }}
       - name: Install Godot 4.7.2
         run: |
           mkdir -p .bin
@@ -42,9 +53,11 @@ jobs:
           chmod +x .bin/godot
           echo "$PWD/.bin" >> "$GITHUB_PATH"
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_SOCI_WITH_POSTGRESQL=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DGODOTCPP_API_VERSION=4.7 -DGODOT_SOCI_WITH_POSTGRESQL=ON
       - name: Compile
         run: cmake --build build --parallel 3
+      - name: Compilation cache statistics
+        run: ccache --show-stats
       - name: Static layout checks
         run: python3 scripts/static_check.py
       - name: Runtime integration tests

@@ -1,0 +1,113 @@
+name: Godot 4.7 integration (Windows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: SQLite + PostgreSQL integration (windows-2022)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: 'godot47-soci-pinned-v1'
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      GODOT_SOCI_PG: 'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=root connect_timeout=3'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout pinned vcpkg
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout e456309491fd875487bf02b8a0dca76c1b1b00cc
+
+      - name: Restore vcpkg binary packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-windows-static-md-e4563094-v1
+
+      - name: Install SQLite and PostgreSQL development libraries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
+          & .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & .\vcpkg\vcpkg.exe install 'sqlite3:x64-windows-static-md' 'libpq:x64-windows-static-md'
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+
+      - name: Save vcpkg binaries before compilation/tests
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-windows-static-md-e4563094-v1
+
+      - name: Initialize MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache godot-cpp and SOCI compilation
+        uses: mozilla-actions/sccache-action@v0.0.11
+
+      - name: Compile GDExtension for Godot 4.7 (template_debug)
+        shell: pwsh
+        run: |
+          $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
+          $args = @(
+            '-S', '.', '-B', 'build-windows-ci',
+            '-G', 'Ninja',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',
+            '-DGODOTCPP_API_VERSION=4.7',
+            '-DGODOTCPP_TARGET=template_debug',
+            '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
+          )
+          & ninja --version
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja is missing on runner' }
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw 'Windows CMake configure failed' }
+          & cmake --build build-windows-ci --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw 'Windows native build failed' }
+          if (!(Test-Path 'addons/godot_soci/bin/windows/godot_soci.windows.template_debug.x86_64.dll')) {
+            throw 'Expected Windows template_debug GDExtension is missing'
+          }
+
+      - name: Compilation cache statistics
+        shell: pwsh
+        run: sccache --show-stats
+
+      - name: Install Godot 4.7.2 for Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .bin | Out-Null
+          curl.exe -fL --retry 3 -o .bin/godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Godot download failed' }
+          Expand-Archive -Path .bin/godot.zip -DestinationPath .bin -Force
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $godot) { throw 'Godot console executable missing' }
+          & $godot --version
+          if ($LASTEXITCODE -ne 0) { throw 'Godot executable failed' }
+
+      - name: Real SQLite and PostgreSQL runtime tests
+        shell: pwsh
+        run: |
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $godot) { throw 'Godot console executable missing' }
+          & ./scripts/run_windows_tests.ps1 -Godot "$godot"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows SQL integration failed' }

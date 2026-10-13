@@ -198,6 +198,15 @@ Completion QueryWorker::run(const Job &job, soci::session &session) {
             result.affected_rows_per_statement.clear();
         }
         result.error = redact(error.what());
+    } catch (...) {
+        // Driver backends may propagate exceptions outside std::exception
+        // on some Windows runtime configurations. Never let one unwind
+        // past the std::thread entry point into Godot's native boundary.
+        if (job.transaction && !result.outcome_unknown) {
+            result.affected_rows = 0;
+            result.affected_rows_per_statement.clear();
+        }
+        result.error = "Database operation failed with a non-standard native exception.";
     }
     return result;
 }

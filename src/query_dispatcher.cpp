@@ -329,6 +329,8 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
         }
     } catch (const std::exception &error) {
         connection_error = "Failed to open database: " + redact(error.what());
+    } catch (...) {
+        connection_error = "Failed to open database: non-standard native exception.";
     }
 
     for (;;) {

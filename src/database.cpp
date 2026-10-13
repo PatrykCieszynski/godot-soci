@@ -274,6 +274,10 @@ Dictionary GodotSociDatabase::execute(const String &sql, const Dictionary &param
         return result;
     } catch (const std::exception &error) {
         return failure_result(error.what());
+    } catch (...) {
+        // Keep unexpected native exceptions from escaping into the Godot ABI.
+        // This also identifies an error path that is not a std::exception.
+        return failure_result("SQL execution failed with a non-standard C++ exception.");
     }
 }
 

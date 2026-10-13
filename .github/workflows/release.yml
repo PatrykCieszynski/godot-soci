@@ -1,0 +1,205 @@
+name: Package Godot 4.7 addon
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Fast workflow and source validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check layout and Python scripts
+        shell: bash
+        run: |
+          python3 scripts/static_check.py
+          python3 -m py_compile scripts/package_addon.py scripts/smoke_release.py
+          python3 scripts/package_addon.py --help
+          python3 scripts/test_package_addon.py
+
+  build:
+    needs: validate
+    # Build and smoke-test both platforms on every PR, main push and tag.
+    name: Native binaries (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            triplet: x64-linux
+          - os: windows-2022
+            platform: windows
+            triplet: x64-windows-static-md
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux toolchain
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build git curl unzip zip pkg-config autoconf automake libtool bison flex perl python3 ccache
+      - name: Checkout pinned vcpkg
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout e456309491fd875487bf02b8a0dca76c1b1b00cc
+      - name: Restore vcpkg binary packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-${{ matrix.triplet }}-e4563094-v1
+      - name: Install static libraries (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p .vcpkg-cache
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          ./vcpkg/vcpkg install 'sqlite3:${{ matrix.triplet }}' 'libpq:${{ matrix.triplet }}'
+      - name: Install static libraries (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
+          & .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & .\vcpkg\vcpkg.exe install 'sqlite3:${{ matrix.triplet }}' 'libpq:${{ matrix.triplet }}'
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+      - name: Persist vcpkg dependencies before compile and smoke tests
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-${{ matrix.triplet }}-e4563094-v1
+
+      - uses: actions/cache@v5
+        if: matrix.platform == 'linux'
+        with:
+          path: .ccache
+          key: release-linux-ccache-ubuntu22-v1-${{ hashFiles('CMakeLists.txt') }}
+      - name: Build Godot debug and release templates (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          for type in Debug Release; do
+            target=template_debug
+            if [[ "$type" == Release ]]; then target=template_release; fi
+            folder=$(echo "$type" | tr '[:upper:]' '[:lower:]')
+            cmake -S . -B "build-$folder" -G Ninja -DCMAKE_BUILD_TYPE="$type" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET='${{ matrix.triplet }}' -DGODOTCPP_API_VERSION=4.7 -DGODOTCPP_TARGET="$target" -DGODOT_SOCI_WITH_POSTGRESQL=ON
+            cmake --build "build-$folder" --parallel 3
+          done
+      - name: Build Godot debug and release templates (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
+          foreach ($type in @('Debug', 'Release')) {
+            $target = if ($type -eq 'Debug') { 'template_debug' } else { 'template_release' }
+            $folder = 'build-' + $type.ToLowerInvariant()
+            $args = @('-S', '.', '-B', $folder, '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}', '-DGODOTCPP_API_VERSION=4.7', "-DGODOTCPP_TARGET=$target", '-DGODOT_SOCI_WITH_POSTGRESQL=ON')
+            & cmake @args
+            if ($LASTEXITCODE -ne 0) { throw "Configure failed: $type" }
+            cmake --build $folder --config Release --parallel 3
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $type" }
+          }
+      - name: Show Linux compilation cache stats
+        if: matrix.platform == 'linux'
+        run: ccache --show-stats
+      - name: Inspect linked dependencies (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          for file in addons/godot_soci/bin/linux/*.so; do
+            echo "Dependencies of $file:"
+            ldd "$file"
+            if ldd "$file" | grep -E 'libpq\.so|libsqlite3\.so|libssl\.so|libcrypto\.so|not found'; then
+              echo '::error::Release must statically link SQLite/libpq/SSL dependencies'
+              exit 1
+            fi
+          done
+      - name: Package platform addon
+        shell: bash
+        run: |
+          python scripts/package_addon.py platform --platform '${{ matrix.platform }}' --out 'dist/godot-soci-${{ matrix.platform }}.zip' --upstream build-debug/_deps --vcpkg-share 'vcpkg/installed/${{ matrix.triplet }}/share'
+      - name: Smoke test packaged addon (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p .bin
+          curl --fail --location --retry 3 -o .bin/godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -j .bin/godot.zip -d .bin/
+          mv .bin/Godot_v4.7.2-stable_linux.x86_64 .bin/godot
+          chmod +x .bin/godot
+          python scripts/smoke_release.py --zip dist/godot-soci-linux.zip --godot .bin/godot
+      - name: Smoke test packaged addon (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .bin | Out-Null
+          curl.exe -fL --retry 3 -o .bin/godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Godot download failed' }
+          Expand-Archive -Path .bin/godot.zip -DestinationPath .bin -Force
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $godot) { throw 'Console-enabled Godot binary missing' }
+          python scripts/smoke_release.py --zip dist/godot-soci-windows.zip --godot "$godot"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows smoke test failed' }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: addon-${{ matrix.platform }}
+          path: dist/godot-soci-${{ matrix.platform }}.zip
+          if-no-files-found: error
+
+  combine:
+    name: Assemble installable addon
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: addon-linux
+          path: dist/parts
+      - uses: actions/download-artifact@v6
+        with:
+          name: addon-windows
+          path: dist/parts
+      - name: Assemble ZIP
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_REF_TYPE}" != tag ]]; then version=preview; fi
+          python scripts/package_addon.py combine --linux dist/parts/godot-soci-linux.zip --windows dist/parts/godot-soci-windows.zip --out "dist/godot-soci-$version.zip"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: godot-soci-installable
+          path: dist/godot-soci-*.zip
+          if-no-files-found: error
+      - name: Create GitHub Release on tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+          gh release create "${GITHUB_REF_NAME}" "dist/godot-soci-${GITHUB_REF_NAME}.zip" --generate-notes --prerelease --title "Godot SOCI ${GITHUB_REF_NAME}"

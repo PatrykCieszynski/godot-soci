@@ -1,0 +1,28 @@
+name: Linux C++ build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOT_SOCI_WITH_POSTGRESQL=ON
+      - name: Compile
+        run: cmake --build build --parallel 3
+      - name: Verify output
+        run: |
+          find addons/godot_soci/bin -type f -name '*.so' -print
+          test -n "$(find addons/godot_soci/bin -type f -name '*.so' -print -quit)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-soci-linux-debug
+          path: addons/godot_soci/

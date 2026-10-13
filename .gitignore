@@ -1,0 +1,13 @@
+/build/
+/.cache/
+/.idea/
+/.vscode/
+/.godot/
+/.import/
+/addons/godot_soci/bin/**/*.dll
+/addons/godot_soci/bin/**/*.so
+/addons/godot_soci/bin/**/*.dylib
+*.db
+*.db-shm
+*.db-wal
+*.tmp

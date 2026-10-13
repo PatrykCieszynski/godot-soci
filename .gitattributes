@@ -1,0 +1,5 @@
+* text=auto
+*.gd text eol=lf
+*.gdextension text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf

@@ -1,0 +1,10 @@
+[configuration]
+entry_symbol = "godot_soci_library_init"
+compatibility_minimum = "4.5"
+reloadable = false
+
+[libraries]
+linux.x86_64.single.debug = "./bin/linux/godot_soci.linux.template_debug.x86_64.so"
+linux.x86_64.single.release = "./bin/linux/godot_soci.linux.template_release.x86_64.so"
+windows.x86_64.single.debug = "./bin/windows/godot_soci.windows.template_debug.x86_64.dll"
+windows.x86_64.single.release = "./bin/windows/godot_soci.windows.template_release.x86_64.dll"

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 GODOT_BIN="${GODOT_BIN:-godot}"
-"$GODOT_BIN" --headless --path . --editor --quit
+# Work around Godot issue #111048: immediate editor shutdown can race GDExtension docs generation.
+"$GODOT_BIN" --headless --path . --editor --quit-after 120 --frame-delay 50
 "$GODOT_BIN" --headless --path . --script res://tests/sqlite_test.gd
 "$GODOT_BIN" --headless --path . --script res://demo/sqlite/threaded.gd
 if [[ -n "${GODOT_SOCI_PG:-}" ]]; then

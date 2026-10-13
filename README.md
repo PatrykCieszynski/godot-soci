@@ -4,6 +4,10 @@ An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/
 
 > **Status: v0.3.1 preview.** Under active validation; avoid using it for production payments or game economies without further testing. Installable ZIP artifacts are produced by the release workflow for Linux and Windows x86_64. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
 
+Read the **[API reference](docs/API.md)** for every public method and result shape,
+**[guarantees and limitations](docs/API.md#guarantees-caveats-and-explicitly-unsupported-features)**,
+and **[integration test coverage](docs/TESTING.md)**.
+
 ## Features
 
 - `GodotSociDatabase` native `RefCounted` class plus optional `SociDatabase` wrapper in `addons/godot_soci/database.gd`.
@@ -33,7 +37,9 @@ Copy `addons/godot_soci/` into another project's `res://addons/`, including nati
 
 The `Package Godot 4.7 addon` workflow builds two Godot-compatible binaries
 (debug and release) per platform on Ubuntu 22.04 and Windows 2022, using pinned
-vcpkg dependencies. The workflow statically links libpq, SQLite and required
+vcpkg dependencies. The Windows `template_debug` and `template_release`
+variants are both compiled against the redistributable Release CRT (/MD);
+no Visual Studio Debug CRT is required to load the editor-side extension. The workflow statically links libpq, SQLite and required
 native libraries (the packaging job verifies Linux linkage), gathers third-party
 license notices and tests a packaged addon in a clean Godot 4.7.2 project.
 

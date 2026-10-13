@@ -8,7 +8,10 @@ on:
       - 'addons/godot_soci/**'
       - 'scripts/package_addon.py'
       - 'scripts/smoke_release.py'
-      - 'tests/release_smoke.gd'
+      - 'tests/**'
+      - 'scripts/run_windows_tests.ps1'
+      - 'README.md'
+      - 'docs/**'
   workflow_dispatch:
   push:
     tags: ['v*']
@@ -88,7 +91,7 @@ jobs:
             $args = @('-S', '.', '-B', $folder, '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}', '-DGODOTCPP_API_VERSION=4.7', "-DGODOTCPP_TARGET=$target", '-DGODOT_SOCI_WITH_POSTGRESQL=ON')
             & cmake @args
             if ($LASTEXITCODE -ne 0) { throw "Configure failed: $type" }
-            cmake --build $folder --config $type --parallel 3
+            cmake --build $folder --config Release --parallel 3
             if ($LASTEXITCODE -ne 0) { throw "Build failed: $type" }
           }
       - name: Inspect linked dependencies (Linux)
@@ -129,6 +132,17 @@ jobs:
           if (-not $godot) { throw 'Console-enabled Godot binary missing' }
           python scripts/smoke_release.py --zip dist/godot-soci-windows.zip --godot "$godot"
           if ($LASTEXITCODE -ne 0) { throw 'Windows smoke test failed' }
+      - name: Integration tests with native SQLite and PostgreSQL (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GODOT_SOCI_PG: 'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=root connect_timeout=3'
+        run: |
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $godot) { throw 'Godot console executable missing' }
+          & ./scripts/run_windows_tests.ps1 -Godot "$godot"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows integration tests failed' }
+
       - uses: actions/upload-artifact@v6
         with:
           name: addon-${{ matrix.platform }}

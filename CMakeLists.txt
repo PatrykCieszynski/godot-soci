@@ -18,8 +18,8 @@ find_package(Threads REQUIRED)
 if(MSVC)
     set(GODOTCPP_USE_STATIC_CPP OFF CACHE BOOL "Use dynamic MSVC CRT" FORCE)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
-        "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
-        CACHE STRING "Match vcpkg /MD(d) CRT for every C++ target" FORCE)
+        "MultiThreadedDLL"
+        CACHE STRING "Use redistributable /MD CRT with release libraries for both Godot template targets" FORCE)
 endif()
 
 FetchContent_Declare(godot_cpp

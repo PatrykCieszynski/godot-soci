@@ -20,3 +20,5 @@ or EditorPlugin activation is necessary.
 
 Use only in server-side code when connecting to a protected PostgreSQL database.
 `SociAsyncDatabase` should be added to the SceneTree for automatic dispatch.
+
+Full API method signatures, result dictionaries and supported types: [API reference](docs/API.md).

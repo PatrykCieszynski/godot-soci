@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import hashlib
 from pathlib import Path, PurePosixPath
 import zipfile
 
@@ -64,6 +63,11 @@ def build_platform(args: argparse.Namespace) -> None:
     for name in ("soci.gdextension", "database.gd", "async_database.gd", "README.md"):
         entries[addon_path(name)] = (ADDON / name).read_bytes()
     entries[addon_path("LICENSE")] = (ROOT / "LICENSE").read_bytes()
+
+    # Keep API docs available inside the installable ZIP rather than linking
+    # to repository-only docs that users do not download.
+    for name in ("API.md", "TESTING.md"):
+        entries[addon_path(f"docs/{name}")] = (ROOT / "docs" / name).read_bytes()
 
     for binary in expected:
         entries[addon_path(binary)] = (ADDON / binary).read_bytes()

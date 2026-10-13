@@ -45,10 +45,10 @@ def main() -> None:
         run([binary, "--headless", "--path", str(project), "--editor",
              "--quit-after", "120", "--frame-delay", "50"])
         command = [binary, "--headless", "--path", str(project),
-                   "--script", "res://smoke.gd"]
+                   "--script", "res://smoke.gd", "--quit-after", "600", "--frame-delay", "30"]
         print("Running packaged smoke script:", " ".join(command), flush=True)
         process = subprocess.run(command, capture_output=True, text=True,
-                                 timeout=90, check=False, errors="replace")
+                                 timeout=45, check=False, errors="replace")
         output = process.stdout + process.stderr
         print(output, flush=True)
         if process.returncode != 0 or "PACKAGED ADDON SMOKE PASS" not in output:

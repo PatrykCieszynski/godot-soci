@@ -43,7 +43,10 @@ func _run() -> void:
             "invalid PG startup"):
         return
     var pg_req := unavailable.query_async("SELECT 1 AS value")
-    if not _check(pg_req != null and await _wait(unavailable, [pg_req]), "bad PG wait"):
+    if not _check(pg_req != null, "bad PG request created"):
+        return
+    var pg_done: bool = await _wait(unavailable, [pg_req])
+    if not _check(pg_done, "bad PG wait"):
         return
     var pg_result: Dictionary = pg_req.get_result()
     if not _check(not pg_result.get("ok", true) and not str(pg_result.get("error", "")).is_empty(),
@@ -63,7 +66,8 @@ func _run() -> void:
     if not _check(first != null and excess == null and
             bounded.get_last_error().contains("capacity"), "queue backpressure"):
         return
-    if not _check(await _wait(bounded, [first]), "first query timed out"):
+    var first_done: bool = await _wait(bounded, [first])
+    if not _check(first_done, "first query timed out"):
         return
     if not _check(first.get_result().get("ok", false), "first query failed"):
         return

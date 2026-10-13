@@ -31,7 +31,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev unzip curl
+          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev unzip curl gdb
       - name: Install Godot 4.7.2
         run: |
           mkdir -p .bin
@@ -51,6 +51,22 @@ jobs:
         run: |
           godot --version
           bash scripts/run_tests.sh
+      - name: Diagnose headless editor crash
+        if: failure()
+        run: |
+          ulimit -c 0
+          echo "=== Godot without GDExtension (control case) ==="
+          mkdir -p /tmp/godot-soci-control
+          printf 'config_version=5\n[application]\nconfig/name="Godot control"\n' > /tmp/godot-soci-control/project.godot
+          timeout 30 godot --headless --path /tmp/godot-soci-control --editor --quit --verbose || true
+          echo "=== Godot with GDExtension (gdb backtrace) ==="
+          timeout 60 gdb --batch --quiet \
+            -ex "set pagination off" \
+            -ex "set print thread-events off" \
+            -ex "run" \
+            -ex "bt 30" \
+            -ex "thread apply all bt 8" \
+            --args godot --headless --path . --editor --quit --verbose || true
       - name: Verify binary
         run: |
           find addons/godot_soci/bin -type f -name '*.so' -print

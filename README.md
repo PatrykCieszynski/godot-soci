@@ -23,6 +23,7 @@ res://
         ├── soci.gdextension
         ├── database.gd
         ├── async_database.gd
+        ├── binary.gd
         ├── docs/
         ├── licenses/
         └── bin/
@@ -190,3 +191,11 @@ or PostgreSQL when `GODOT_SOCI_BACKEND=postgresql` and
 `GODOT_SOCI_PG` are set. CI runs `tests/backend_parity_test.gd`
 against both databases for basic types. Use PostgreSQL credentials only
 in a trusted server process.
+
+## Binary data (SQLite BLOB / PostgreSQL BYTEA)
+
+Use `SociBinary.to_hex()`, `parameter_expression()`, `select_expression()`
+and `from_hex()` to transfer `PackedByteArray` into native binary columns
+without injecting untrusted values into SQL. This explicit conversion is
+portable but incurs hex encoding overhead; it is not direct native blob binding.
+See [binary usage](docs/API.md#portable-blobbytea-round-trip-godot-47).

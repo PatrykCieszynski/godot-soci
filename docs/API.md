@@ -16,8 +16,10 @@ Native classes are registered by `soci.gdextension`; `SociDatabase` and
 | `String` | UTF-8 text | `String` |
 | date/time columns | backend-dependent | timestamp string, not DateTime object |
 
-Complex types (BLOB, `PackedByteArray`, JSON/JSONB object mapping, UUID,
-arrays) have no first-class mapping. Cast to a supported type where appropriate.
+Complex native types (`PackedByteArray`, JSON/JSONB object mapping, UUID,
+arrays) have no first-class bind mapping in the SOCI session. For portable
+BLOB/BYTEA storage, use the `SociBinary` helper documented below. Other
+complex values should be cast to a supported SQL type where appropriate.
 Use named SQL parameters (`:id` in SQL with `{"id": 42}`), not string interpolation.
 Duplicate SELECT column names are rejected: use SQL `AS` aliases.
 
@@ -203,3 +205,37 @@ GODOT_SOCI_BACKEND=postgresql GODOT_SOCI_PG='host=127.0.0.1 port=5432 dbname=gam
 See `tests/backend_parity_test.gd` for cross-backend checks of int64,
 double, UTF-8 text and NULL values. Driver-dependent SQL features and
 schema migrations are **not** automatically translated.
+
+## Portable BLOB/BYTEA round-trip (Godot 4.7+)
+
+`SociBinary` encodes `PackedByteArray` to lowercase hexadecimal TEXT and
+provides a backend-specific SQL expression that writes it into a *native*
+SQLite `BLOB` or PostgreSQL `BYTEA`. Returned BLOBs are fetched through
+`hex()`/`encode()` and decoded back to `PackedByteArray`.
+This avoids SOCI's different SQLite/PostgreSQL native `blob` vs large-object
+semantics. The hex string **must still be bound**, never interpolated.
+This is an explicit conversion helper, not transparent native binary binding.
+
+```gdscript
+# SQLite: CREATE TABLE files(id BIGINT PRIMARY KEY, payload BLOB)
+# PostgreSQL: CREATE TABLE files(id BIGINT PRIMARY KEY, payload BYTEA)
+var bytes := PackedByteArray([0, 1, 127, 255])
+var expr := SociBinary.parameter_expression(backend, "payload")
+var write: Dictionary = await db.execute_async(
+    "INSERT INTO files(id,payload) VALUES (:id," + expr + ")",
+    {"id": 1, "payload": SociBinary.to_hex(bytes)}
+)
+var encoded_expr := SociBinary.select_expression(backend, "payload")
+var read: Dictionary = await db.query_async(
+    "SELECT " + encoded_expr + " AS payload_hex FROM files WHERE id=:id",
+    {"id": 1}
+)
+if read.get("ok", false) and read["rows"].size() == 1:
+    var result: PackedByteArray = SociBinary.from_hex(read["rows"][0]["payload_hex"])
+```
+
+Hex encoding increases bind/result payload sizes; use smaller payloads
+(icons, compressed configuration, snapshots), not large streaming video. Both
+SQL expressions validate that their identifier argument is a simple SQL name.
+Binary support requires SQLite's built-in `unhex()` function (SQLite >= 3.44).
+Tests verify NUL and non-ASCII octets round-trip through both backends.

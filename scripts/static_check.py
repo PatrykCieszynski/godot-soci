@@ -16,6 +16,7 @@ required = (
     "addons/godot_soci/soci.gdextension",
     "addons/godot_soci/database.gd",
     "addons/godot_soci/async_database.gd",
+    "addons/godot_soci/binary.gd",
     "project.godot",
     "demo/common/demo.tscn",
     "demo/common/demo_scene.gd",

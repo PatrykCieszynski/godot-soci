@@ -54,6 +54,43 @@ func _run() -> void:
             printerr("BACKEND PARITY FAILED: text/null type: ", backend["name"], " ", row)
             quit(1)
             return
+        # Both backends store native binary data. The SQL expressions differ,
+        # but the GDScript API and PackedByteArray result stay the same.
+        var binary_type := "BLOB" if backend["name"] == "sqlite3" else "BYTEA"
+        var blob_table: Dictionary = await db.execute_async(
+            "CREATE TABLE IF NOT EXISTS soci_blob_parity (id BIGINT PRIMARY KEY, payload " + binary_type + ")"
+        )
+        if not blob_table.get("ok", false):
+            printerr("BACKEND PARITY FAILED: blob table ", blob_table)
+            quit(1)
+            return
+        var cleared: Dictionary = await db.execute_async(
+            "DELETE FROM soci_blob_parity WHERE id=:id", {"id": 4000000000}
+        )
+        if not cleared.get("ok", false):
+            printerr("BACKEND PARITY FAILED: blob delete ", cleared)
+            quit(1)
+            return
+        var bytes := PackedByteArray([0, 1, 42, 127, 128, 254, 255])
+        var placeholder := SociBinary.parameter_expression(backend["name"], "payload")
+        var blob_insert: Dictionary = await db.execute_async(
+            "INSERT INTO soci_blob_parity (id,payload) VALUES (:id," + placeholder + ")",
+            {"id": 4000000000, "payload": SociBinary.to_hex(bytes)}
+        )
+        var select_blob := SociBinary.select_expression(backend["name"], "payload")
+        var blob_query: Dictionary = await db.query_async(
+            "SELECT " + select_blob + " AS payload_hex FROM soci_blob_parity WHERE id=:id",
+            {"id": 4000000000}
+        )
+        if not blob_insert.get("ok", false) or not blob_query.get("ok", false) or blob_query["rows"].size() != 1:
+            printerr("BACKEND PARITY FAILED: blob SQL ", blob_insert, blob_query)
+            quit(1)
+            return
+        var returned: PackedByteArray = SociBinary.from_hex(blob_query["rows"][0]["payload_hex"])
+        if returned != bytes:
+            printerr("BACKEND PARITY FAILED: blob round trip ", backend["name"], " ", returned)
+            quit(1)
+            return
         db.stop()
         db.queue_free()
         print("BACKEND PARITY: ", backend["name"], " PASS")

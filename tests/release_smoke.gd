@@ -50,6 +50,23 @@ func _run() -> void:
     if not balance.get("ok", false) or int(balance["rows"][0]["balance"]) != 50:
         _failure("Database commit check: " + str(balance))
         return
+    var raw := PackedByteArray([0, 42, 128, 255])
+    var create_blob: Dictionary = await wrapper.execute_async(
+        "CREATE TABLE binary_smoke (id INTEGER PRIMARY KEY, payload BLOB)"
+    )
+    var put_blob: Dictionary = await wrapper.execute_async(
+        "INSERT INTO binary_smoke (id,payload) VALUES (1," + SociBinary.parameter_expression("sqlite3", "payload") + ")",
+        {"payload": SociBinary.to_hex(raw)}
+    )
+    var get_blob: Dictionary = await wrapper.query_async(
+        "SELECT " + SociBinary.select_expression("sqlite3", "payload") + " AS data FROM binary_smoke WHERE id=1"
+    )
+    if not create_blob.get("ok", false) or not put_blob.get("ok", false) or not get_blob.get("ok", false) or get_blob["rows"].size() != 1:
+        _failure("Packaged binary query failed: " + str(create_blob) + str(put_blob) + str(get_blob))
+        return
+    if SociBinary.from_hex(get_blob["rows"][0]["data"]) != raw:
+        _failure("Packed binary round-trip mismatch")
+        return
     wrapper.stop()
     wrapper.queue_free()
     print("PACKAGED ADDON SMOKE PASS")

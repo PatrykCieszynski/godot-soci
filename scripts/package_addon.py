@@ -71,7 +71,7 @@ def build_platform(args: argparse.Namespace) -> None:
             raise RuntimeError(f"Compiled {args.platform} binary absent: {binary}")
 
     entries: dict[str, bytes] = {}
-    for name in ("soci.gdextension", "database.gd", "async_database.gd", "README.md"):
+    for name in ("soci.gdextension", "database.gd", "async_database.gd", "binary.gd", "README.md"):
         entries[addon_path(name)] = normalize_entry(name, (ADDON / name).read_bytes())
     entries[addon_path("LICENSE")] = normalize_entry("LICENSE", (ROOT / "LICENSE").read_bytes())
 

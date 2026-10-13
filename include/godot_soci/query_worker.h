@@ -23,7 +23,15 @@ struct Parameter {
     Value value;
 };
 
+struct BatchStatement {
+    std::string sql;
+    std::vector<Parameter> params;
+    int64_t expected_affected_rows = -1;
+};
+
 struct Job {
+    bool transaction = false;
+    std::vector<BatchStatement> statements;
     uint64_t id = 0;
     bool query = false;
     int max_rows = 1000;
@@ -34,6 +42,9 @@ struct Job {
 using Row = std::vector<std::pair<std::string, Value>>;
 
 struct Completion {
+    bool transaction = false;
+    bool outcome_unknown = false;
+    std::vector<int64_t> affected_rows_per_statement;
     uint64_t id = 0;
     bool query = false;
     bool ok = false;

@@ -79,6 +79,47 @@ db.queue_free()
 
 **Limits:** one worker per dispatcher, no async transaction/session-scoped API yet, no query cancellation or universal query timeout. `stop()` waits for any active blocking database call to finish. Configure DB/driver-side timeouts before relying on shutdown during network failures. Explicit transactions remain available through the synchronous connection API.
 
+## Atomic async transaction batches
+
+For small MMO operations that must either all commit or all roll back, use
+`transaction_async()`. The entire batch runs as one queued job on one SOCI
+session; unrelated requests cannot execute between its statements.
+
+```gdscript
+var outcome: Dictionary = await db.transaction_async([
+    {"sql": "UPDATE wallets SET yang = yang - :amount WHERE id=:id AND yang >= :amount",
+     "params": {"amount": 100, "id": 10}, "expected_affected_rows": 1},
+    {"sql": "UPDATE wallets SET yang = yang + :amount WHERE id=:id",
+     "params": {"amount": 100, "id": 20}, "expected_affected_rows": 1}
+])
+if not outcome.ok:
+    if outcome.get("outcome_unknown", false):
+        push_error("Commit outcome unknown; reconcile before retrying")
+    else:
+        push_error(outcome.error)
+```
+
+Each entry requires `sql`, with optional `params: Dictionary` and
+`expected_affected_rows: int`. A mismatch aborts and rolls back the entire
+batch. Supported statements should be non-returning SQL (DML); do not embed
+transaction control or `RETURNING`. Commit failures can have an unknown outcome,
+which is explicitly flagged. Use durable operation IDs/idempotency in a real
+game economy and do **not** retry an unknown commit blindly.
+
+For individual asynchronous statements use `query_async()` and
+`execute_async()`. The batch feature is intentionally **not** a long-lived
+transaction handle. If you need dynamic decisions between statements, use
+an explicit single-session transactional service instead.
+
+### Timeouts and shutdown
+
+`stop()` joins the database worker and may block if a driver call hangs. For
+PostgreSQL configure `connect_timeout` in the libpq connection string and
+database-side `statement_timeout` / `lock_timeout` as appropriate. For
+SQLite configure `PRAGMA busy_timeout` to bound lock waits; it does not cap
+query execution time. These are backend-specific mitigations, **not** a
+universal timeout or safe query cancellation facility.
+
 ## Demos and tests
 
 ```bash

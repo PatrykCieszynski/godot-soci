@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <condition_variable>
@@ -53,6 +54,7 @@ public:
 
     Ref<SociQueryRequest> query_async(const String &sql, const Dictionary &params, int max_rows);
     Ref<SociQueryRequest> execute_async(const String &sql, const Dictionary &params);
+    Ref<SociQueryRequest> transaction_async(const Array &statements);
     int poll(int max_completions = 64);
 };
 

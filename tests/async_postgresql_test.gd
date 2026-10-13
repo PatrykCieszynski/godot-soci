@@ -38,6 +38,35 @@ func _run() -> void:
         return
     if not _check(selected["rows"][0]["label"] == "O'Reilly 🌍", "UTF-8 value"):
         return
+    var tx_table: Dictionary = await db.execute_async(
+        "CREATE TABLE IF NOT EXISTS async_tx_test (id BIGINT PRIMARY KEY, coins INTEGER NOT NULL)"
+    )
+    if not _check(tx_table.get("ok", false), "transaction table"):
+        return
+    if not _check((await db.execute_async("DELETE FROM async_tx_test")).get("ok", false), "transaction reset"):
+        return
+    var committed: Dictionary = await db.transaction_async([
+        {"sql": "INSERT INTO async_tx_test (id,coins) VALUES (:id,:coins)",
+            "params": {"id": 21, "coins": 100}, "expected_affected_rows": 1},
+        {"sql": "UPDATE async_tx_test SET coins=coins+:delta WHERE id=:id",
+            "params": {"id": 21, "delta": 50}, "expected_affected_rows": 1}
+    ])
+    if not _check(committed.get("ok", false) and committed.get("affected_rows", 0) == 2,
+            "transaction commit " + str(committed)):
+        return
+    var rejected: Dictionary = await db.transaction_async([
+        {"sql": "UPDATE async_tx_test SET coins=coins+:delta WHERE id=:id",
+            "params": {"id": 21, "delta": 900}, "expected_affected_rows": 1},
+        {"sql": "UPDATE async_tx_test SET coins=0 WHERE id=:id",
+            "params": {"id": 999}, "expected_affected_rows": 1}
+    ])
+    if not _check(not rejected.get("ok", true) and not rejected.get("outcome_unknown", true),
+            "failed transaction rollback " + str(rejected)):
+        return
+    var balance: Dictionary = await db.query_async("SELECT coins FROM async_tx_test WHERE id=:id", {"id": 21})
+    if not _check(balance.get("ok", false) and balance["rows"][0]["coins"] == 150,
+            "atomic rollback verified " + str(balance)):
+        return
     db.stop()
     db.queue_free()
     print("ASYNC POSTGRESQL PASS")

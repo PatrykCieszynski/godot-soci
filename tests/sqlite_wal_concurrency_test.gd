@@ -100,8 +100,8 @@ func _run() -> void:
     var result: Dictionary = final_count.get_result()
     var expected := WRITES_PER_WORKER * 2
     if not _assert(result.get("ok", false) and
-            result["rows"][0]["total"] == expected and
-            result["rows"][0]["distinct_total"] == expected,
+            int(result["rows"][0]["total"]) == expected and
+            int(result["rows"][0]["distinct_total"]) == expected,
             "missing/duplicate writes: " + str(result)):
         return
 

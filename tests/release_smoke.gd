@@ -23,7 +23,7 @@ func _run() -> void:
         _failure("Native SQLite open: " + native_db.get_last_error())
         return
     var native_result: Dictionary = native_db.query("SELECT 42 AS answer")
-    if not native_result.get("ok", false) or native_result["rows"][0]["answer"] != 42:
+    if not native_result.get("ok", false) or int(native_result["rows"][0]["answer"]) != 42:
         _failure("Native SQL test: " + str(native_result))
         return
     native_db.close()
@@ -34,7 +34,7 @@ func _run() -> void:
         _failure("Async database start: " + wrapper.get_last_error())
         return
     var result: Dictionary = await wrapper.query_async("SELECT 43 AS answer")
-    if not result.get("ok", false) or result["rows"][0]["answer"] != 43:
+    if not result.get("ok", false) or int(result["rows"][0]["answer"]) != 43:
         _failure("Async SQL test: " + str(result))
         return
 
@@ -47,7 +47,7 @@ func _run() -> void:
         _failure("Native atomic transaction: " + str(committed))
         return
     var balance: Dictionary = await wrapper.query_async("SELECT balance FROM ledger WHERE id=1")
-    if not balance.get("ok", false) or balance["rows"][0]["balance"] != 50:
+    if not balance.get("ok", false) or int(balance["rows"][0]["balance"]) != 50:
         _failure("Database commit check: " + str(balance))
         return
     wrapper.stop()

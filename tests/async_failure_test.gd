@@ -34,6 +34,8 @@ func _run() -> void:
         return
     if not _check(db.execute("CREATE TABLE IF NOT EXISTS failure_test (n INTEGER)").get("ok", false), "create"):
         return
+    if not _check(db.execute("DELETE FROM failure_test").get("ok", false), "reset"):
+        return
     db.close()
 
     # start() means the thread was launched, NOT that a DB connection succeeded.
@@ -105,7 +107,7 @@ func _run() -> void:
     var persisted: Dictionary = db.query("SELECT COUNT(*) AS total FROM failure_test")
     if not _check(persisted.get("ok", false), "verification query"):
         return
-    if not _check(persisted["rows"][0]["total"] >= completed,
+    if not _check(int(persisted["rows"][0]["total"]) == completed,
             "committed operations missing: " + str(persisted)):
         return
     db.close()

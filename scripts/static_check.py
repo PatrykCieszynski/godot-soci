@@ -15,6 +15,7 @@ required = (
     "demo/sqlite/basic.gd",
     "demo/sqlite/threaded.gd",
     "demo/postgresql/basic.gd",
+    "demo/postgresql/docker-compose.yml",
     "tests/sqlite_test.gd",
     "tests/postgresql_test.gd",
 )

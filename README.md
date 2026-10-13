@@ -59,10 +59,10 @@ bash scripts/run_tests.sh
 To enable local PostgreSQL tests using a disposable database:
 
 ```bash
-docker compose -f demo/docker-compose.yml up -d --wait
+docker compose -f demo/postgresql/docker-compose.yml up -d --wait
 export GODOT_SOCI_PG='host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo'
 bash scripts/run_tests.sh
-docker compose -f demo/docker-compose.yml down -v
+docker compose -f demo/postgresql/docker-compose.yml down -v
 ```
 
 Demos: `demo/sqlite/basic.gd`, `demo/sqlite/threaded.gd`, `demo/postgresql/basic.gd`. Tests: `tests/sqlite_test.gd`, `tests/postgresql_test.gd`.

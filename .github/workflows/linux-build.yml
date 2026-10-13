@@ -2,6 +2,7 @@ name: Godot 4.7 integration (Linux)
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +12,7 @@ jobs:
     timeout-minutes: 40
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: demo
           POSTGRES_PASSWORD: demo

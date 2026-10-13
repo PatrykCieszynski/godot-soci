@@ -1,4 +1,4 @@
-# Architecture (v0.2)
+# Architecture (v0.3)
 
 `GodotSociDatabase` remains the synchronous, single-owner SOCI connection. It is unchanged and supports explicit transactions.
 
@@ -46,10 +46,10 @@ the client must reconcile rather than retry an economy mutation.
 This avoids session-affinity problems from interleaving a long-lived transaction
 with unrelated jobs. Long-lived interactive transactions remain unsupported.
 
-## Deliberate v0.2 limitations
+## Deliberate v0.3 limitations
 
 - Single worker per dispatcher, no parallel SQL within one dispatcher.
-- No async transaction commands or session-pinned transaction handles. The synchronous driver remains available for transactional operations on an explicitly owned connection.
+- Supports atomic async batches, but not long-lived interactive transactions or session-pinned transaction handles. The synchronous driver remains available for complex transactional operations on an explicitly owned connection.
 - No driver-independent SQL cancellation, reconnect/retry, or query timeout.
 - Results are bounded by `max_rows`, but individual row sizes are not capped.
 - SQL dialects, migrations and isolation levels remain backend-specific.

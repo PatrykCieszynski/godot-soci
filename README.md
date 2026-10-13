@@ -2,7 +2,7 @@
 
 An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing synchronous and asynchronous SQLite/PostgreSQL APIs to GDScript.
 
-> **Status: v0.2 preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
+> **Status: v0.3 preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
 
 ## Features
 
@@ -77,7 +77,7 @@ db.queue_free()
 
 `start()` schedules connection setup on the worker; it does **not** guarantee the database is reachable. A connection failure appears in the completed request's error. A request submitted at capacity is rejected immediately (native API returns `null`; the GDScript wrapper returns an `ok=false` Dictionary). `max_pending` defaults to 128 and includes running/completed-but-not-polled requests.
 
-**Limits:** one worker per dispatcher, no async transaction/session-scoped API yet, no query cancellation or universal query timeout. `stop()` waits for any active blocking database call to finish. Configure DB/driver-side timeouts before relying on shutdown during network failures. Explicit transactions remain available through the synchronous connection API.
+**Limits:** one worker per dispatcher, atomic transaction batches but no long-lived interactive transaction handles, no query cancellation or universal query timeout. `stop()` waits for any active blocking database call to finish. Configure DB/driver-side timeouts before relying on shutdown during network failures. Explicit transactions remain available through the synchronous connection API.
 
 ## Atomic async transaction batches
 
@@ -141,9 +141,9 @@ Demos: `demo/sqlite/basic.gd`, `demo/sqlite/threaded.gd`, `demo/postgresql/basic
 
 ## Roadmap / limitations
 
-v0.2 does **not** provide multi-worker connection pooling, async transaction handles, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
+v0.3 does **not** provide multi-worker connection pooling, interactive async transaction handles, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
 
-The v0.2 native request/worker/dispatcher provide a single-worker foundation. Multi-worker pooling requires transaction affinity and lifecycle tests. See `docs/ARCHITECTURE.md`.
+The v0.3 native request/worker/dispatcher provide a single-worker foundation plus atomic transaction batches. Multi-worker pooling requires transaction affinity and lifecycle tests. See `docs/ARCHITECTURE.md`.
 
 SOCI does not abstract SQL dialects or migrations. Never distribute production database credentials with a game client or send raw database errors to untrusted multiplayer users.
 

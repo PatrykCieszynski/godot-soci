@@ -1,5 +1,5 @@
 #include "register_types.h"
-#include "godot_soci_database.h"
+#include "godot_soci/database.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/godot.hpp>

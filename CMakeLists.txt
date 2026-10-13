@@ -8,6 +8,8 @@ set(GODOT_SOCI_GODOT_CPP_REF "b8530af7546a3fcae80cef2477526569fd42ffc2" CACHE ST
 set(GODOT_SOCI_SOCI_REF "a9e51707d565baa6e02634453d5e81b84062c94a" CACHE STRING "SOCI commit")
 option(GODOT_SOCI_WITH_POSTGRESQL "Compile PostgreSQL backend (requires libpq)" ON)
 
+# Match the minimum runtime version in the .gdextension manifest.
+set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for godot-cpp")
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 FetchContent_Declare(godot_cpp
@@ -47,11 +49,11 @@ FetchContent_Declare(soci_src
 FetchContent_MakeAvailable(soci_src)
 
 add_library(godot_soci SHARED
-    src/godot_soci_database.cpp
+    src/database.cpp
     src/register_types.cpp
 )
 target_compile_features(godot_soci PRIVATE cxx_std_17)
-target_include_directories(godot_soci PRIVATE src)
+target_include_directories(godot_soci PRIVATE src include)
 target_link_libraries(godot_soci PRIVATE godot-cpp SOCI::SQLite3)
 if(GODOT_SOCI_WITH_POSTGRESQL)
     target_link_libraries(godot_soci PRIVATE SOCI::PostgreSQL)

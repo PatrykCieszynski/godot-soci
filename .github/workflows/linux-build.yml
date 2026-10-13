@@ -1,28 +1,77 @@
-name: Linux C++ build
+name: Godot 4.7 integration (Linux)
+
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 jobs:
   linux:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: godot_soci_demo
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U demo -d godot_soci_demo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GODOT_SOCI_PG: "host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo"
     steps:
-      - uses: actions/checkout@v4
-      - name: Install native dependencies
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev
+          sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev unzip curl gdb
+      - name: Install Godot 4.7.2
+        run: |
+          mkdir -p .bin
+          curl --fail --location --retry 3 --output godot.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -j godot.zip -d .bin/
+          mv .bin/Godot_v4.7.2-stable_linux.x86_64 .bin/godot
+          chmod +x .bin/godot
+          echo "$PWD/.bin" >> "$GITHUB_PATH"
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOT_SOCI_WITH_POSTGRESQL=ON
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_SOCI_WITH_POSTGRESQL=ON
       - name: Compile
         run: cmake --build build --parallel 3
-      - name: Verify output
+      - name: Static layout checks
+        run: python3 scripts/static_check.py
+      - name: Runtime integration tests
+        run: |
+          godot --version
+          bash scripts/run_tests.sh
+      - name: Diagnose headless editor crash
+        if: failure()
+        run: |
+          ulimit -c 0
+          echo "=== Godot without GDExtension (control case) ==="
+          mkdir -p /tmp/godot-soci-control
+          printf 'config_version=5\n[application]\nconfig/name="Godot control"\n' > /tmp/godot-soci-control/project.godot
+          timeout 30 godot --headless --path /tmp/godot-soci-control --editor --quit --verbose || true
+          echo "=== Godot with GDExtension (gdb backtrace) ==="
+          timeout 60 gdb --batch --quiet \
+            -ex "set pagination off" \
+            -ex "set print thread-events off" \
+            -ex "run" \
+            -ex "bt 30" \
+            -ex "thread apply all bt 8" \
+            --args godot --headless --path . --editor --quit --verbose || true
+      - name: Verify binary
         run: |
           find addons/godot_soci/bin -type f -name '*.so' -print
           test -n "$(find addons/godot_soci/bin -type f -name '*.so' -print -quit)"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: godot-soci-linux-debug
           path: addons/godot_soci/

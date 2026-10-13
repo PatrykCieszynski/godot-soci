@@ -1,42 +1,34 @@
 # godot-soci
 
-A small **Godot GDExtension** backed by [SOCI](https://github.com/SOCI/soci), providing SQLite and PostgreSQL through a uniform API for Godot 4.x / GDScript. Based on the layout and registration pattern of [godot-cpp-template](https://github.com/godotengine/godot-cpp-template).
+An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing SQLite and PostgreSQL through a common synchronous GDScript API.
 
-**Status: v0.1 source preview, not yet built or runtime-tested here.** Do not use for production payments/game economy without CI, integration testing and an audit. The ZIP is a complete *source* repository; it intentionally does not include binaries or third-party source. CMake fetches pinned upstream commits.
+> **Status: v0.1.x preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
 
 ## Features
 
-- `GodotSociDatabase` native `RefCounted`, instantiable directly in GDScript.
-- Backends: `sqlite3`; `postgresql` by default (can disable at build time).
-- Named SQL parameters via SOCI, with explicit type handling for null, booleans, 64-bit signed integers, floating-point values and UTF-8 strings.
-- Read queries return `Dictionary { ok, error, rows, truncated }`, each row a `Dictionary`; default bounded 1,000 rows, maximum 100,000. Use `LIMIT` in SQL for real pagination.
-- Mutations return `{ ok, error, affected_rows }`.
-- `begin()`, SQLite-only `begin_immediate()`, `commit()`, `rollback()`.
-- No database credentials are hard-coded in the project. Connection string passed at runtime.
-- A **real threaded** SQLite example with worker-owned connection, plus SQLite/PostgreSQL transaction demos.
-- `godot-soci` is a *synchronous driver*. Godot's `Thread` supplies concurrency; `await` / `call_deferred()` alone do not.
+- `GodotSociDatabase` native `RefCounted` class plus optional `SociDatabase` wrapper in `addons/godot_soci/database.gd`.
+- SQLite (`sqlite3`) and PostgreSQL (`postgresql`) via native SOCI backends.
+- Named SQL binds for `null`, `bool`, 64-bit signed integers, floats and UTF-8 strings.
+- Bounded results: `query()` returns `{ok, error, rows, truncated}`; `execute()` returns `{ok, error, affected_rows}`.
+- Explicit transactions: `begin()`, SQLite `begin_immediate()`, `commit()`, and `rollback()`.
+- Duplicate SQL result column names rejected (use `AS` aliases).
+- A dedicated threaded SQLite example; native `query_async()` is not available yet.
 
-## Build (Linux x86_64)
+## Build
 
-Prerequisites: CMake >= 3.23, Git, Python 3, a C++17 compiler, development libraries for SQLite and `libpq`, a recent Godot 4 desktop/editor executable. CMake downloads `godot-cpp` and `SOCI` (including SOCI's fmt dependency submodule). Network access is required on first configure.
+Requires CMake 3.23+, Git, Python 3, C++17 compiler, SQLite development libraries and optionally PostgreSQL/`libpq`. CMake fetches pinned `godot-cpp` and SOCI revisions.
 
 ```bash
-sudo apt-get update
 sudo apt-get install -y build-essential cmake git python3 libsqlite3-dev libpq-dev libfmt-dev
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOT_SOCI_WITH_POSTGRESQL=ON
-cmake --build build --config Debug --parallel 4
-# The native binary is written to addons/godot_soci/bin/linux/
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_SOCI_WITH_POSTGRESQL=ON
+cmake --build build --parallel 4
 ```
 
-On Windows, use Visual Studio 2022 or newer with CMake; install SQLite and PostgreSQL development libraries through vcpkg or another package manager. Pass `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` as appropriate. **CI must verify Windows output names and runtime DLL dependencies before publishing prebuilt releases.**
+Windows requires an appropriate MSVC/vcpkg setup; automated Windows builds remain a future task. Native binaries are written to `addons/godot_soci/bin/<platform>/` and the `soci.gdextension` manifest requires Godot 4.7+.
 
-The CMake file pins upstream commits to the versions inspected during this implementation. For Godot 4.7 and later, check your Godot executable/API compatibility with the pinned `godot-cpp` version. You can override `-DGODOT_SOCI_GODOT_CPP_REF=<tag-or-sha>` and `-DGODOT_SOCI_SOCI_REF=<tag-or-sha>` for an upgrade.
+Copy `addons/godot_soci/` into another project's `res://addons/`, including native binaries and required runtime libraries (e.g. `libpq`). The extension loads automatically; there is no EditorPlugin to enable.
 
-### Portable addon installation
-
-Copy **`addons/godot_soci/`** into another Godot project's `res://addons/` folder. You must include the compiled libraries in `addons/godot_soci/bin/` for every platform/configuration you use. This plugin has no `EditorPlugin` to enable: the `.gdextension` is loaded automatically when its native binary exists.
-
-## API example
+## Example
 
 ```gdscript
 var db := GodotSociDatabase.new()
@@ -44,84 +36,45 @@ if not db.open("sqlite3", ProjectSettings.globalize_path("user://example.db")):
     push_error(db.get_last_error())
     return
 
-var created := db.execute("CREATE TABLE IF NOT EXISTS players (id BIGINT PRIMARY KEY, name TEXT)")
-var inserted := db.execute("INSERT INTO players(id, name) VALUES (:id, :name)", {"id": 123, "name": "Archer"})
-var result := db.query("SELECT id, name FROM players WHERE id = :id", {"id": 123}, 100)
+db.execute("CREATE TABLE IF NOT EXISTS players(id BIGINT PRIMARY KEY, name TEXT)")
+var inserted := db.execute("INSERT INTO players(id, name) VALUES(:id, :name)", {"id": 42, "name": "Archer"})
+var result := db.query("SELECT id, name FROM players WHERE id=:id", {"id": 42})
 if result["ok"]:
     print(result["rows"])
-else:
-    push_error(result["error"])
 db.close()
 ```
 
-Or connect to PostgreSQL using a libpq-style string such as `host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo` (example-only credentials).
+You can also instantiate `SociDatabase.new()` for the equivalent thin GDScript wrapper API. **Both APIs are synchronous** and may block the caller; keep slow SQL away from gameplay frames. For off-thread use, create/open/use/close a separate instance inside each worker thread; see `demo/sqlite/threaded.gd`.
 
-### Transactions
+Use the explicit transaction methods; `execute("BEGIN")` bypasses the native transaction-state flag. A failed commit has an unknown outcome and must not be blindly retried for currency/item transfers.
 
-```gdscript
-if db.begin_immediate():  # sqlite3 only; db.begin() works on either backend
-    var outcome := db.execute("UPDATE wallets SET yang = yang - :amount WHERE id = :id", {"amount": 10, "id": 123})
-    if outcome["ok"] and outcome["affected_rows"] == 1:
-        if not db.commit():
-            push_error("Unknown commit outcome; reconcile before any retry")
-    else:
-        db.rollback()
-```
-
-**Do not** automatically retry failed commits; the transaction may have committed before the connection failed. For real economy operations implement durable command IDs and atomic receipts at the application layer. For SQLite `begin_immediate()` reserves the writer slot before the first mutation; regular `begin()` uses backend defaults. PostgreSQL has different locking and concurrency semantics; SOCI does **not** translate your SQL dialect or schema.
-
-### Threading
-
-Never use a single `GodotSociDatabase` instance from multiple threads concurrently. Instead create/open/use/close a separate instance *inside each worker thread*. The class intentionally does not advertise `query_async()` because the database operations are synchronous in the calling thread. See the working example `demo/scripts/threaded_sqlite.gd`.
-
-## Run demos
-
-The repository root is a Godot project (`project.godot`) containing the addon and demos.
+## Demos and tests
 
 ```bash
-# After building, with Godot installed:
 export GODOT_BIN=godot
-./scripts/run_demos.sh  # SQLite and a real threaded SQLite demo
+bash scripts/run_demos.sh
+bash scripts/run_tests.sh
+```
 
-# PostgreSQL demo with a temporary local database
-# Requires Docker Compose:
-docker compose -f demo/docker-compose.yml up -d --wait
+To enable local PostgreSQL tests using a disposable database:
+
+```bash
+docker compose -f demo/postgresql/docker-compose.yml up -d --wait
 export GODOT_SOCI_PG='host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo'
-./scripts/run_demos.sh
-# Then stop containers if desired:
-docker compose -f demo/docker-compose.yml down -v
+bash scripts/run_tests.sh
+docker compose -f demo/postgresql/docker-compose.yml down -v
 ```
 
-Or run a single test manually: `godot --headless --path . --script res://demo/scripts/postgres_demo.gd`.
+Demos: `demo/sqlite/basic.gd`, `demo/sqlite/threaded.gd`, `demo/postgresql/basic.gd`. Tests: `tests/sqlite_test.gd`, `tests/postgresql_test.gd`.
 
-For SQLite files in paths containing spaces, pass **the bare full path** to `open("sqlite3", path)` and set `PRAGMA` options explicitly, instead of concatenating `dbname=... timeout=...` into a space-delimited string.
+## Roadmap / limitations
 
-Demo coverage: schema initialization, parameter binding, SQL escaping, 64-bit integers, UTF-8, NULL values, commit/rollback; SQLite WAL/FULL; and a threaded read/write example. PostgreSQL is optional if the connection env variable is absent.
+v0.1 does **not** provide a native dispatcher, connection pooling, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
 
-## Limitations in v0.1
+Next, implement real `query_request` and `query_worker` components with bounded queues, safe completion, and worker-owned sessions. Avoid creating unused placeholders. See `docs/ARCHITECTURE.md`.
 
-- Synchronous API. Thread scheduling, queueing, connection pools and cancellation are intentionally outside this generic driver. Don't invoke potentially slow SQL directly from a gameplay frame.
-- `execute()` is for statements not returning rows. Use `query()` for `SELECT` or DML `RETURNING`.
-- Supported binds: `null`, `bool`, `int`, `float`, `String`. Unsupported Godot Variants fail explicitly. Arrays, byte arrays, binary `BLOB`/`BYTEA`, JSON and typed time values need a separately designed API. Complex result columns can be cast to `TEXT` in SQL.
-- No SQL dialect or migration translation. `CREATE TABLE`, triggers, `PRAGMA`, lock semantics and custom SQL functions can differ across backends.
-- One connection per instance, caller must serialize access. Use explicit rollback on validation failures, then close connections before dropping their owning threads.
-- `open` errors may contain server details despite basic `password=` redaction; keep detailed errors server-side and never expose SQL/DB errors directly to public clients.
-- No query cancellation or query timeout abstraction yet. PostgreSQL connection/query timeouts may be specified at the server/connection level; SQLite `PRAGMA busy_timeout` controls busy wait.
-- Binaries are server-side dependencies; don't distribute production database credentials or libpq-enabled server addon with an untrusted multiplayer game client.
+SOCI does not abstract SQL dialects or migrations. Never distribute production database credentials with a game client or send raw database errors to untrusted multiplayer users.
 
-## Repository structure
+## License
 
-```text
-addons/godot_soci/             Godot-installable addon (native binary generated by CMake)
-src/                          C++ GDExtension (SOCI binding)
-demo/scripts/sqlite_demo.gd    SQLite smoke + transactions
-demo/scripts/postgres_demo.gd  PostgreSQL smoke + transactions
-demo/scripts/threaded_sqlite.gd   Actual Godot worker thread demo
-demo/docker-compose.yml       Local disposable PostgreSQL
-docs/                          Design and testing notes
-.github/workflows/             Linux source build check
-```
-
-## Upstream licenses
-
-This wrapper is MIT-licensed (`LICENSE`). SOCI is distributed under Boost Software License 1.0; godot-cpp is MIT-licensed. Their original source files and license notices remain in their respective upstream dependencies obtained during the build. See `docs/UPSTREAM.md` for pinned revisions and attribution.
+The wrapper is MIT-licensed (`LICENSE`). SOCI uses the Boost Software License 1.0, and godot-cpp is MIT. Preserve required third-party notices when distributing binaries and bundled dependencies. See `docs/UPSTREAM.md`.

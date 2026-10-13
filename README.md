@@ -1,8 +1,8 @@
 # godot-soci
 
-An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing SQLite and PostgreSQL through a common synchronous GDScript API.
+An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/SOCI/soci), exposing synchronous and asynchronous SQLite/PostgreSQL APIs to GDScript.
 
-> **Status: v0.1.x preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
+> **Status: v0.2 preview.** Under active validation; avoid using it for production payments or game economies without further testing. The source repository does not ship binaries. Linux CI builds and runs integration tests against Godot 4.7.2, SQLite and PostgreSQL.
 
 ## Features
 
@@ -12,7 +12,8 @@ An MIT-licensed **Godot 4.7+ GDExtension** powered by [SOCI](https://github.com/
 - Bounded results: `query()` returns `{ok, error, rows, truncated}`; `execute()` returns `{ok, error, affected_rows}`.
 - Explicit transactions: `begin()`, SQLite `begin_immediate()`, `commit()`, and `rollback()`.
 - Duplicate SQL result column names rejected (use `AS` aliases).
-- A dedicated threaded SQLite example; native `query_async()` is not available yet.
+- Native single-worker asynchronous dispatcher, bounded pending requests and retained request completion.
+- A dedicated threaded SQLite example for users of the synchronous API.
 
 ## Build
 
@@ -48,6 +49,36 @@ You can also instantiate `SociDatabase.new()` for the equivalent thin GDScript w
 
 Use the explicit transaction methods; `execute("BEGIN")` bypasses the native transaction-state flag. A failed commit has an unknown outcome and must not be blindly retried for currency/item transfers.
 
+## Async usage (v0.2)
+
+The native `SociQueryDispatcher` runs a single long-lived C++ worker on a dedicated database session. `SociQueryRequest` exposes `is_done()`, `get_result()` and the `completed(result)` signal. **It does not require an additional Godot worker thread.**
+
+For a convenient GDScript `await` API, create a `SociAsyncDatabase` node and **add it to the SceneTree**. The node calls `dispatcher.poll()` every frame to deliver results on the main thread.
+
+```gdscript
+var db := SociAsyncDatabase.new()
+add_child(db)
+if not db.start("sqlite3", ProjectSettings.globalize_path("user://example.db")):
+    push_error(db.get_last_error())
+    return
+
+var inserted: Dictionary = await db.execute_async(
+    "INSERT INTO players(id, name) VALUES (:id, :name)",
+    {"id": 42, "name": "Archer"}
+)
+var selected: Dictionary = await db.query_async(
+    "SELECT id, name FROM players WHERE id=:id", {"id": 42}
+)
+if selected.ok:
+    print(selected.rows)
+db.stop()
+db.queue_free()
+```
+
+`start()` schedules connection setup on the worker; it does **not** guarantee the database is reachable. A connection failure appears in the completed request's error. A request submitted at capacity is rejected immediately (native API returns `null`; the GDScript wrapper returns an `ok=false` Dictionary). `max_pending` defaults to 128 and includes running/completed-but-not-polled requests.
+
+**Limits:** one worker per dispatcher, no async transaction/session-scoped API yet, no query cancellation or universal query timeout. `stop()` waits for any active blocking database call to finish. Configure DB/driver-side timeouts before relying on shutdown during network failures. Explicit transactions remain available through the synchronous connection API.
+
 ## Demos and tests
 
 ```bash
@@ -69,9 +100,9 @@ Demos: `demo/sqlite/basic.gd`, `demo/sqlite/threaded.gd`, `demo/postgresql/basic
 
 ## Roadmap / limitations
 
-v0.1 does **not** provide a native dispatcher, connection pooling, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
+v0.2 does **not** provide multi-worker connection pooling, async transaction handles, query cancellation, generic timeouts, BLOB/`PackedByteArray` bindings, or first-class PostgreSQL JSON/UUID/ARRAY support. Limit large result sets using SQL pagination.
 
-Next, implement real `query_request` and `query_worker` components with bounded queues, safe completion, and worker-owned sessions. Avoid creating unused placeholders. See `docs/ARCHITECTURE.md`.
+The v0.2 native request/worker/dispatcher provide a single-worker foundation. Multi-worker pooling requires transaction affinity and lifecycle tests. See `docs/ARCHITECTURE.md`.
 
 SOCI does not abstract SQL dialects or migrations. Never distribute production database credentials with a game client or send raw database errors to untrusted multiplayer users.
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(godot_soci VERSION 0.1.0 LANGUAGES C CXX)
+project(godot_soci VERSION 0.2.0 LANGUAGES C CXX)
 
 include(FetchContent)
 
@@ -11,6 +11,7 @@ option(GODOT_SOCI_WITH_POSTGRESQL "Compile PostgreSQL backend (requires libpq)" 
 # Match the minimum runtime version in the .gdextension manifest.
 set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for godot-cpp")
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(Threads REQUIRED)
 
 FetchContent_Declare(godot_cpp
     GIT_REPOSITORY https://github.com/godotengine/godot-cpp.git
@@ -50,11 +51,14 @@ FetchContent_MakeAvailable(soci_src)
 
 add_library(godot_soci SHARED
     src/database.cpp
+    src/query_request.cpp
+    src/query_worker.cpp
+    src/query_dispatcher.cpp
     src/register_types.cpp
 )
 target_compile_features(godot_soci PRIVATE cxx_std_17)
 target_include_directories(godot_soci PRIVATE src include)
-target_link_libraries(godot_soci PRIVATE godot-cpp SOCI::SQLite3)
+target_link_libraries(godot_soci PRIVATE godot-cpp Threads::Threads SOCI::SQLite3)
 if(GODOT_SOCI_WITH_POSTGRESQL)
     target_link_libraries(godot_soci PRIVATE SOCI::PostgreSQL)
     target_compile_definitions(godot_soci PRIVATE GODOT_SOCI_WITH_POSTGRESQL=1)

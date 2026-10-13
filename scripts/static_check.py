@@ -7,8 +7,15 @@ required = (
     "include/godot_soci/database.h",
     "src/database.cpp",
     "src/register_types.cpp",
+    "src/query_worker.cpp",
+    "src/query_dispatcher.cpp",
+    "src/query_request.cpp",
+    "include/godot_soci/query_dispatcher.h",
+    "include/godot_soci/query_request.h",
+    "include/godot_soci/query_worker.h",
     "addons/godot_soci/soci.gdextension",
     "addons/godot_soci/database.gd",
+    "addons/godot_soci/async_database.gd",
     "project.godot",
     "demo/common/demo.tscn",
     "demo/common/demo_scene.gd",
@@ -18,6 +25,8 @@ required = (
     "demo/postgresql/docker-compose.yml",
     "tests/sqlite_test.gd",
     "tests/postgresql_test.gd",
+    "tests/async_sqlite_test.gd",
+    "tests/async_postgresql_test.gd",
 )
 for rel in required:
     assert (root / rel).is_file(), rel

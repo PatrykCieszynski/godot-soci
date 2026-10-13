@@ -1,5 +1,7 @@
 #include "register_types.h"
 #include "godot_soci/database.h"
+#include "godot_soci/query_request.h"
+#include "godot_soci/query_dispatcher.h"
 
 #include <gdextension_interface.h>
 #include <godot_cpp/godot.hpp>
@@ -9,6 +11,8 @@ using namespace godot;
 void initialize_godot_soci(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         GDREGISTER_CLASS(GodotSociDatabase);
+        GDREGISTER_CLASS(SociQueryRequest);
+        GDREGISTER_CLASS(SociQueryDispatcher);
     }
 }
 

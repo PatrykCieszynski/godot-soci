@@ -77,7 +77,7 @@ def build_platform(args: argparse.Namespace) -> None:
 
     # Keep API docs available inside the installable ZIP rather than linking
     # to repository-only docs that users do not download.
-    for name in ("API.md", "TESTING.md"):
+    for name in ("API.md", "TESTING.md", "ASSET_LIBRARY.md"):
         entries[addon_path(f"docs/{name}")] = normalize_entry(name, (ROOT / "docs" / name).read_bytes())
 
     for binary in expected:

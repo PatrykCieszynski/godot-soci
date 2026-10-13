@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<class name="SociQueryDispatcher" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+    <brief_description>Background SOCI worker with a bounded request queue. Call poll() on the Godot main thread.</brief_description>
+    <description>Background SOCI worker with a bounded request queue. Call poll() on the Godot main thread. See res://addons/godot_soci/docs/API.md for usage examples, threading limitations and failure handling.</description>
+    <methods>
+        <method name="start">
+            <return type="bool" />
+            <param index="0" name="backend" type="String" />
+            <param index="1" name="connection_string" type="String" />
+            <param index="2" name="max_pending" type="int" default="128" />
+            <description>Starts a dedicated database worker; does not guarantee that the connection succeeded.</description>
+        </method>
+        <method name="stop">
+            <return type="void" />
+
+            <description>Stops and joins the worker. May block until a running SQL operation ends.</description>
+        </method>
+        <method name="is_started">
+            <return type="bool" />
+
+            <description>True when the worker has started, not necessarily connected.</description>
+        </method>
+        <method name="pending">
+            <return type="int" />
+
+            <description>Number of queued, executing and not-yet-delivered requests.</description>
+        </method>
+        <method name="get_last_error">
+            <return type="String" />
+
+            <description>Last request-submission or configuration error.</description>
+        </method>
+        <method name="query_async">
+            <return type="SociQueryRequest" />
+            <param index="0" name="sql" type="String" />
+            <param index="1" name="params" type="Dictionary" default="{}" />
+            <param index="2" name="max_rows" type="int" default="1000" />
+            <description>Queues a SELECT and returns a request, or null on backpressure/error.</description>
+        </method>
+        <method name="execute_async">
+            <return type="SociQueryRequest" />
+            <param index="0" name="sql" type="String" />
+            <param index="1" name="params" type="Dictionary" default="{}" />
+            <description>Queues non-row-returning SQL.</description>
+        </method>
+        <method name="transaction_async">
+            <return type="SociQueryRequest" />
+            <param index="0" name="statements" type="Array" />
+            <description>Queues an atomic batch with rollback on statement errors and optional affected-row guards.</description>
+        </method>
+        <method name="poll">
+            <return type="int" />
+            <param index="0" name="max_completions" type="int" default="64" />
+            <description>Delivers up to max_completions finished requests on the main thread.</description>
+        </method>
+    </methods>
+
+</class>

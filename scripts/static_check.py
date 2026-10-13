@@ -32,6 +32,11 @@ required = (
     "scripts/run_windows_tests.ps1",
     "docs/API.md",
     "docs/TESTING.md",
+    "tests/backend_parity_test.gd",
+    "demo/backend_switch.gd",
+    "doc_classes/GodotSociDatabase.xml",
+    "doc_classes/SociQueryDispatcher.xml",
+    "doc_classes/SociQueryRequest.xml",
 )
 for rel in required:
     assert (root / rel).is_file(), rel

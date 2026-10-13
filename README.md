@@ -171,3 +171,22 @@ The GDExtension wrapper is MIT-licensed ([LICENSE](LICENSE)). SOCI uses the
 Boost Software License 1.0 and `godot-cpp` uses MIT. The installable archive
 includes relevant third-party license notices and source licensing remains
 documented in [docs/UPSTREAM.md](docs/UPSTREAM.md).
+
+## Manual release from GitHub Actions
+
+After merging and checking that CI is green, open
+**Actions → Package Godot 4.7 addon → Run workflow**, choose **main**,
+and type a semver tag such as `v0.3.2` in the `version` input.
+The workflow validates the version, builds and smoke-tests both platform ZIPs,
+assembles a cross-platform ZIP, and only then creates the release tag
+at the tested commit and publishes a GitHub **prerelease**.
+This is equivalent to pushing a `v*` tag; no local Git command is needed.
+Do not reuse an existing release tag.
+
+## Backend-switch example
+
+`demo/backend_switch.gd` demonstrates the same API on SQLite locally
+or PostgreSQL when `GODOT_SOCI_BACKEND=postgresql` and
+`GODOT_SOCI_PG` are set. CI runs `tests/backend_parity_test.gd`
+against both databases for basic types. Use PostgreSQL credentials only
+in a trusted server process.

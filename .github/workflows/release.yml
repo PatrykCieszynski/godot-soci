@@ -6,6 +6,11 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. v0.3.1 (creates the tag and GitHub prerelease)"
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -20,6 +25,24 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - name: Validate manual release request
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]] || { echo "::error::Run manual releases from main only"; exit 1; }
+          [[ "${RELEASE_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo "::error::Invalid version: use vMAJOR.MINOR.PATCH"; exit 1; }
+          if gh release view "${RELEASE_VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::Release ${RELEASE_VERSION} already exists"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_VERSION}" >/dev/null; then
+            echo "::error::Tag ${RELEASE_VERSION} already exists"
+            exit 1
+          fi
+
       - name: Check layout and Python scripts
         shell: bash
         run: |
@@ -185,21 +208,35 @@ jobs:
           path: dist/parts
       - name: Assemble ZIP
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           version="${GITHUB_REF_NAME}"
-          if [[ "${GITHUB_REF_TYPE}" != tag ]]; then version=preview; fi
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${RELEASE_VERSION}"
+          elif [[ "${GITHUB_REF_TYPE}" != tag ]]; then
+            version=preview
+          fi
           python scripts/package_addon.py combine --linux dist/parts/godot-soci-linux.zip --windows dist/parts/godot-soci-windows.zip --out "dist/godot-soci-$version.zip"
       - uses: actions/upload-artifact@v6
         with:
           name: godot-soci-installable
           path: dist/godot-soci-*.zip
           if-no-files-found: error
-      - name: Create GitHub Release on tags
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish GitHub prerelease and create tag if manually dispatched
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           git fetch origin main
           git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
-          gh release create "${GITHUB_REF_NAME}" "dist/godot-soci-${GITHUB_REF_NAME}.zip" --generate-notes --prerelease --title "Godot SOCI ${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            # GitHub CLI creates the tag at this already-tested commit.
+            gh release create "${RELEASE_VERSION}" "dist/godot-soci-${RELEASE_VERSION}.zip" \
+              --target "${GITHUB_SHA}" --generate-notes --prerelease --title "Godot SOCI ${RELEASE_VERSION}"
+          else
+            gh release create "${GITHUB_REF_NAME}" "dist/godot-soci-${GITHUB_REF_NAME}.zip" \
+              --verify-tag --generate-notes --prerelease --title "Godot SOCI ${GITHUB_REF_NAME}"
+          fi

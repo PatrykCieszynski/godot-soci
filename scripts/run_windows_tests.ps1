@@ -12,6 +12,8 @@ New-Item -ItemType Directory -Force -Path $script:TestProject | Out-Null
 Copy-Item -LiteralPath 'project.godot' -Destination $script:TestProject
 Copy-Item -LiteralPath 'addons' -Destination (Join-Path $script:TestProject 'addons') -Recurse
 Copy-Item -LiteralPath 'tests' -Destination (Join-Path $script:TestProject 'tests') -Recurse
+New-Item -ItemType Directory -Force -Path (Join-Path $script:TestProject 'demo') | Out-Null
+Copy-Item -LiteralPath 'demo/backend_switch.gd' -Destination (Join-Path $script:TestProject 'demo/backend_switch.gd')
 Write-Host "Windows native CI project: $script:TestProject"
 
 function Invoke-GodotBounded {
@@ -77,7 +79,8 @@ $tests = @(
     @{ Name = 'sqlite_wal_concurrency_test.gd'; Marker = 'SQLITE WAL CONCURRENCY PASS' },
     @{ Name = 'async_failure_test.gd'; Marker = 'ASYNC FAILURE PATHS PASS' },
     @{ Name = 'postgresql_test.gd'; Marker = 'POSTGRESQL INTEGRATION PASS' },
-    @{ Name = 'async_postgresql_test.gd'; Marker = 'ASYNC POSTGRESQL PASS' }
+    @{ Name = 'async_postgresql_test.gd'; Marker = 'ASYNC POSTGRESQL PASS' },
+    @{ Name = 'backend_parity_test.gd'; Marker = 'BACKEND TYPE PARITY PASS' }
 )
 foreach ($test in $tests) {
     Invoke-GodotBounded -Arguments @('--headless', '--path', '.',

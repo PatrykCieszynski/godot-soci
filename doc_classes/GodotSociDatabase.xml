@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<class name="GodotSociDatabase" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+    <brief_description>Native synchronous SQLite and PostgreSQL database connection. Do not block gameplay frames.</brief_description>
+    <description>Native synchronous SQLite and PostgreSQL database connection. Do not block gameplay frames. See res://addons/godot_soci/docs/API.md for usage examples, threading limitations and failure handling.</description>
+    <methods>
+        <method name="open">
+            <return type="bool" />
+            <param index="0" name="backend" type="String" />
+            <param index="1" name="connection_string" type="String" />
+            <description>Opens one SQLite or PostgreSQL session. Connection can block.</description>
+        </method>
+        <method name="close">
+            <return type="void" />
+
+            <description>Closes the session and rolls back an outstanding explicit transaction.</description>
+        </method>
+        <method name="is_open">
+            <return type="bool" />
+
+            <description>True if the session is connected.</description>
+        </method>
+        <method name="get_backend">
+            <return type="String" />
+
+            <description>The active backend name.</description>
+        </method>
+        <method name="get_last_error">
+            <return type="String" />
+
+            <description>Last error (connection credentials redacted).</description>
+        </method>
+        <method name="execute">
+            <return type="Dictionary" />
+            <param index="0" name="sql" type="String" />
+            <param index="1" name="params" type="Dictionary" default="{}" />
+            <description>Executes parameterized non-row-returning SQL; returns ok, error and affected_rows.</description>
+        </method>
+        <method name="query">
+            <return type="Dictionary" />
+            <param index="0" name="sql" type="String" />
+            <param index="1" name="params" type="Dictionary" default="{}" />
+            <param index="2" name="max_rows" type="int" default="1000" />
+            <description>Queries at most max_rows rows; returns ok, error, rows and truncated.</description>
+        </method>
+        <method name="begin">
+            <return type="bool" />
+
+            <description>Begins an explicit SQL transaction.</description>
+        </method>
+        <method name="begin_immediate">
+            <return type="bool" />
+
+            <description>Starts SQLite BEGIN IMMEDIATE transaction; SQLite only.</description>
+        </method>
+        <method name="commit">
+            <return type="bool" />
+
+            <description>Commits the current SQL transaction.</description>
+        </method>
+        <method name="rollback">
+            <return type="bool" />
+
+            <description>Rolls back the current SQL transaction.</description>
+        </method>
+        <method name="in_transaction">
+            <return type="bool" />
+
+            <description>Whether the explicit transaction API considers a transaction active.</description>
+        </method>
+    </methods>
+
+</class>

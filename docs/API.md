@@ -182,3 +182,24 @@ and use idempotency keys before retries.
 
 See [Testing](TESTING.md), [Architecture](ARCHITECTURE.md) and the
 [project README](../README.md).
+
+## Built-in editor documentation
+
+The debug native GDExtension embeds the Godot class-reference XML for
+`GodotSociDatabase`, `SociQueryDispatcher` and `SociQueryRequest`.
+Use the editor Help / Search Help to inspect methods. The high-level
+`SociAsyncDatabase` wrapper uses GDScript doc comments.
+
+## SQLite → PostgreSQL parity demo
+
+Run the same code against both backends:
+
+```bash
+godot --headless --path . --script res://demo/backend_switch.gd
+GODOT_SOCI_BACKEND=postgresql GODOT_SOCI_PG='host=127.0.0.1 port=5432 dbname=game user=game password=example' \
+  godot --headless --path . --script res://demo/backend_switch.gd
+```
+
+See `tests/backend_parity_test.gd` for cross-backend checks of int64,
+double, UTF-8 text and NULL values. Driver-dependent SQL features and
+schema migrations are **not** automatically translated.

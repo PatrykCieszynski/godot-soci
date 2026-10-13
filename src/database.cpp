@@ -1,4 +1,4 @@
-#include "godot_soci_database.h"
+#include "godot_soci/database.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/char_string.hpp>
@@ -201,6 +201,9 @@ Dictionary GodotSociDatabase::row_to_dictionary(const soci::row &row) {
     for (std::size_t i = 0; i < row.size(); ++i) {
         const auto &column = row.get_properties(i);
         const String name = from_utf8(column.get_name());
+        if (out.has(name)) {
+            throw std::runtime_error("Duplicate SQL result column name: " + utf8(name) + ". Use explicit SQL aliases.");
+        }
         if (row.get_indicator(i) == soci::i_null) {
             out[name] = Variant();
             continue;

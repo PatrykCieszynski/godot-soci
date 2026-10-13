@@ -1,20 +1,33 @@
-"""Cheap repository-level sanity checks; not a substitute for native compile/CI."""
+"""Repository-level layout checks; native compilation/runtime are covered by CI."""
 from pathlib import Path
-import re
 
 root = Path(__file__).resolve().parents[1]
-assert (root / 'CMakeLists.txt').exists()
-assert (root / 'addons/godot_soci/godot_soci.gdextension').exists()
-assert (root / 'project.godot').exists()
-source = (root / 'src/godot_soci_database.cpp').read_text()
-for name in ('begin_immediate', 'bind_arguments', 'statement.define_and_bind', 'rollback()', 'GODOT_SOCI_WITH_POSTGRESQL'):
-    assert name in source, name
-for script in ('sqlite_demo', 'postgres_demo', 'threaded_sqlite'):
-    p = root / f'demo/scripts/{script}.gd'
-    assert p.is_file(), p
-for path in (root / 'demo').rglob('*.gd'):
-    content = path.read_text()
-    assert '\t' not in content, path
-for match in re.findall(r'res://(demo/[^"\n]+)', (root / 'demo/scenes/demo.tscn').read_text()):
-    assert (root / match).exists(), match
-print('STATIC SOURCE LAYOUT PASS (native build/runtime not tested)')
+required = (
+    "CMakeLists.txt",
+    "include/godot_soci/database.h",
+    "src/database.cpp",
+    "src/register_types.cpp",
+    "addons/godot_soci/soci.gdextension",
+    "addons/godot_soci/database.gd",
+    "project.godot",
+    "demo/common/demo.tscn",
+    "demo/common/demo_scene.gd",
+    "demo/sqlite/basic.gd",
+    "demo/sqlite/threaded.gd",
+    "demo/postgresql/basic.gd",
+    "tests/sqlite_test.gd",
+    "tests/postgresql_test.gd",
+)
+for rel in required:
+    assert (root / rel).is_file(), rel
+cmake = (root / "CMakeLists.txt").read_text()
+manifest = (root / "addons/godot_soci/soci.gdextension").read_text()
+source = (root / "src/database.cpp").read_text()
+assert 'GODOTCPP_API_VERSION "4.7"' in cmake
+assert 'compatibility_minimum = "4.7"' in manifest
+assert "Duplicate SQL result column name" in source
+assert "src/database.cpp" in cmake
+assert "include/godot_soci" in cmake
+for path in (root / "demo").rglob("*.gd"):
+    assert "\t" not in path.read_text(), path
+print("STATIC SOURCE LAYOUT PASS (not a substitute for Godot integration tests)")

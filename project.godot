@@ -2,7 +2,7 @@ config_version=5
 
 [application]
 config/name="godot-soci demo"
-run/main_scene="res://demo/scenes/demo.tscn"
+run/main_scene="res://demo/common/demo.tscn"
 
 [rendering]
 renderer/rendering_method="gl_compatibility"

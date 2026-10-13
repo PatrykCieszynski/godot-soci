@@ -1,19 +1,30 @@
-# Design boundaries (v0.1)
+# Architecture (v0.1.x)
 
-The native `GodotSociDatabase` is a synchronous, single-owner session wrapper. Each instance owns one `soci::session` and uses SOCI's direct `sqlite3`/`postgresql` backend factories (not dynamically loaded SOCI plugins). No `SceneTree` or gameplay objects are accessed by the wrapper.
+The native `GodotSociDatabase` is a synchronous, single-owner wrapper. Each instance owns one SOCI session. The public GDScript `SociDatabase` wrapper delegates to it without changing thread-affinity guarantees.
 
-`execute`/`query` accept a dictionary of named typed bind parameters. Native values are kept in a `std::deque` so addresses remain stable throughout SOCI statement preparation, binding and execution. Prepared statements are short-lived within each method call. `query` reads a bounded number of rows and returns copied Godot values. The caller owns pagination, rate limits, caches and snapshots.
+- Godot input is converted into typed SOCI parameters stored in a `std::deque` so bind addresses remain stable.
+- `query()` copies at most `max_rows` records into Godot dictionaries and reports truncation separately.
+- Duplicate output column names are rejected instead of silently overwriting a previous value. Use SQL aliases.
+- The session tracks explicit transactions via `begin()`, `begin_immediate()`, `commit()`, and `rollback()`. Use these methods, not `execute("BEGIN")`, because arbitrary SQL is not parsed to synchronize the transaction flag.
+- No implicit reconnects or automatic retries of transactions. A failed commit can have an unknown outcome.
 
-Transactions are explicit: no hidden reconnection or retry. The wrapper tracks `begin`/`begin_immediate` to avoid nested transactions and roll back an active transaction on `close()`. A failed `commit()` retains the active flag: higher layers must resolve an unknown outcome instead of replaying money/item mutations.
+## Layout
 
-## Future v0.2 candidates
+- `include/godot_soci/database.h` — native driver contract
+- `src/database.cpp` — synchronous SOCI implementation
+- `src/register_types.cpp` — Godot registration
+- `addons/godot_soci/` — installable addon, optional GDScript wrapper
+- `demo/sqlite/` and `demo/postgresql/` — manual demos, including a real Godot Thread example
+- `tests/` — headless Godot integration tests against real DB engines in Linux CI
 
-1. Add a native thread-safe job dispatcher with per-worker sessions, bounded queue and completion delivery on the Godot/main thread. Before that, validate one-worker semantics using `demo/scripts/threaded_sqlite.gd`.
-2. Typed BLOB/byte-array support with explicit copy ownership, JSON casts, timestamp/date conversion and PostgreSQL-specific result types.
-3. Connection pool, query timeouts and controlled shutdown semantics; result paging/streaming for huge data sets.
-4. CI integration with an actual Godot editor and PostgreSQL service on Linux/Windows, plus sanitizer builds.
-5. Generate installable prebuilt addon releases for Windows/Linux (each debug/release x86_64 binary and any runtime dependencies).
+## v0.2: native async dispatcher
 
-## Do not abstract away SQL dialects
+Do not introduce placeholder worker/request translation units. When implementing async, add `src/query_request.cpp`, `src/query_worker.cpp` and matching public headers, with a real, independently tested request lifecycle.
 
-The low-level transport is shared, but schema migrations, upserts, `BEGIN IMMEDIATE`, PostgreSQL row locks, JSON operations and triggers remain backend-specific. Write repository-level contracts in the application and test them separately for both engines.
+1. Convert input to plain C++ data *before* enqueueing; do not pass live Godot scene objects to worker threads.
+2. Use a bounded request queue and long-lived DB workers, with one session owned per worker.
+3. Deliver completions on Godot's main thread; expose a request object that retains completion state (not just a one-shot signal).
+4. Handle shutdown, cancellation of queued work, DB timeouts, transaction/session affinity, and unknown commit outcomes.
+5. Keep the synchronous driver available for tools, migration scripts and explicit off-thread use.
+
+SOCI normalizes connection APIs, not SQL dialects. PostgreSQL and SQLite schema/locking behavior remains application-specific.

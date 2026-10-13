@@ -19,6 +19,8 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: 'godot47-soci-pinned-v1'
       VCPKG_DISABLE_METRICS: '1'
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
       GODOT_SOCI_PG: 'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=root connect_timeout=3'
@@ -54,26 +56,41 @@ jobs:
           path: .vcpkg-cache
           key: release-vcpkg-x64-windows-static-md-e4563094-v1
 
+      - name: Initialize MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache godot-cpp and SOCI compilation
+        uses: mozilla-actions/sccache-action@v0.0.11
+
       - name: Compile GDExtension for Godot 4.7 (template_debug)
         shell: pwsh
         run: |
           $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
           $args = @(
             '-S', '.', '-B', 'build-windows-ci',
-            '-G', 'Visual Studio 17 2022', '-A', 'x64',
+            '-G', 'Ninja',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
             "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
             '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',
             '-DGODOTCPP_API_VERSION=4.7',
             '-DGODOTCPP_TARGET=template_debug',
             '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
           )
+          & ninja --version
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja is missing on runner' }
           & cmake @args
           if ($LASTEXITCODE -ne 0) { throw 'Windows CMake configure failed' }
-          & cmake --build build-windows-ci --config Release --parallel 3
+          & cmake --build build-windows-ci --parallel 3
           if ($LASTEXITCODE -ne 0) { throw 'Windows native build failed' }
           if (!(Test-Path 'addons/godot_soci/bin/windows/godot_soci.windows.template_debug.x86_64.dll')) {
             throw 'Expected Windows template_debug GDExtension is missing'
           }
+
+      - name: Compilation cache statistics
+        shell: pwsh
+        run: sccache --show-stats
 
       - name: Install Godot 4.7.2 for Windows
         shell: pwsh

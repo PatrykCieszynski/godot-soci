@@ -2,6 +2,7 @@ name: Package Godot 4.7 addon
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '.github/workflows/release.yml'
       - 'CMakeLists.txt'
@@ -22,7 +23,22 @@ permissions:
   contents: read
 
 jobs:
+  validate:
+    name: Fast workflow and source validation
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check layout and Python scripts
+        shell: bash
+        run: |
+          python3 scripts/static_check.py
+          python3 -m py_compile scripts/package_addon.py scripts/smoke_release.py
+          python3 scripts/package_addon.py --help
+
   build:
+    # Full build on manual/tag requests, or PR opt-in via full-release label.
+    if: github.event_name != 'pull_request' || (github.event.action == 'labeled' && github.event.label.name == 'full-release')
     name: Native binaries (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 100
@@ -39,13 +55,15 @@ jobs:
     env:
       VCPKG_DISABLE_METRICS: '1'
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
     steps:
       - uses: actions/checkout@v6
       - name: Install Linux toolchain
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build git curl unzip zip pkg-config autoconf automake libtool bison flex perl python3
+          sudo apt-get install -y build-essential cmake ninja-build git curl unzip zip pkg-config autoconf automake libtool bison flex perl python3 ccache
       - name: Checkout pinned vcpkg
         shell: bash
         run: |
@@ -71,6 +89,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
           & .\vcpkg\vcpkg.exe install 'sqlite3:${{ matrix.triplet }}' 'libpq:${{ matrix.triplet }}'
           if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+      - uses: actions/cache@v5
+        if: matrix.platform == 'linux'
+        with:
+          path: .ccache
+          key: release-linux-ccache-ubuntu22-v1-${{ hashFiles('CMakeLists.txt') }}
       - name: Build Godot debug and release templates (Linux)
         if: matrix.platform == 'linux'
         shell: bash
@@ -79,7 +102,7 @@ jobs:
             target=template_debug
             if [[ "$type" == Release ]]; then target=template_release; fi
             folder=$(echo "$type" | tr '[:upper:]' '[:lower:]')
-            cmake -S . -B "build-$folder" -G Ninja -DCMAKE_BUILD_TYPE="$type" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET='${{ matrix.triplet }}' -DGODOTCPP_API_VERSION=4.7 -DGODOTCPP_TARGET="$target" -DGODOT_SOCI_WITH_POSTGRESQL=ON
+            cmake -S . -B "build-$folder" -G Ninja -DCMAKE_BUILD_TYPE="$type" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET='${{ matrix.triplet }}' -DGODOTCPP_API_VERSION=4.7 -DGODOTCPP_TARGET="$target" -DGODOT_SOCI_WITH_POSTGRESQL=ON
             cmake --build "build-$folder" --parallel 3
           done
       - name: Build Godot debug and release templates (Windows)
@@ -96,6 +119,9 @@ jobs:
             cmake --build $folder --config Release --parallel 3
             if ($LASTEXITCODE -ne 0) { throw "Build failed: $type" }
           }
+      - name: Show Linux compilation cache stats
+        if: matrix.platform == 'linux'
+        run: ccache --show-stats
       - name: Inspect linked dependencies (Linux)
         if: matrix.platform == 'linux'
         shell: bash

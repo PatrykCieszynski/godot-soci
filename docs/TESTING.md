@@ -1,12 +1,55 @@
-# Integration and release testing
+# Integration, packages and release testing
 
-**CI coverage:** Godot 4.7.2 and real SQLite/PostgreSQL on Linux and Windows
-x86_64. Static C++ builds alone are *not* sufficient proof of functionality.
+CI uses **Godot 4.7.2**, with real SQLite and PostgreSQL on Windows and Linux
+x86_64. The only build/test workflow is [ci.yml](../.github/workflows/ci.yml).
+[release.yml](../.github/workflows/release.yml) only promotes an existing
+artifact; it never compiles any C++.
 
-## Linux
+## CI pipeline
 
-The Linux integration workflow starts a PostgreSQL service container, compiles
-the debug extension and runs `scripts/run_tests.sh`. Locally:
+| Event | Linux (Ubuntu 22.04) | Windows (2022) | Final artifact |
+|---|---|---|---|
+| Pull request | Build template_debug, real SQLite/PostgreSQL tests | Build template_debug, real SQLite/PostgreSQL tests | No installable ZIP; fast feedback |
+| Push to main | Build template_debug, test, build template_release, package + smoke | Build template_debug, test, build template_release, package + smoke | One cross-platform `godot-soci-installable.zip` |
+| Manual release or version tag | **No rebuild** | **No rebuild** | Download and publish successful `main` CI artifact for exact SHA |
+
+Each OS builds its library once per template variant. PostgreSQL runs as a
+service container on Linux; Windows uses PostgreSQL 14 preinstalled on
+`windows-2022`. CI reuses pinned vcpkg package caches and compiler object
+caches. Native Windows and Linux build configurations differ deliberately:
+Windows uses `CMAKE_BUILD_TYPE=Release` for both Godot template ABIs to use
+optimized vcpkg `lib/` and the redistributable MSVC `/MD` runtime. Linux
+uses CMake Debug/Release for the corresponding variants.
+
+## Windows optimized SQLite regression guard
+
+The build runs `scripts/check_windows_sqlite_link.py` against the actual
+Ninja DLL link command of each template. It requires
+`vcpkg/installed/x64-windows-static-md/lib/sqlite3.lib`, rejects
+`debug/lib/sqlite3.lib`, and checks `CMAKE_BUILD_TYPE=Release`.
+A real-engine SQL test additionally checks
+`sqlite_compileoption_used('SQLITE_DEBUG') = 0`, including in the packaged
+Windows smoke project. This checks the shipped SQLite implementation rather
+than assuming a successful linker invocation means optimized SQLite.
+
+We do not patch upstream SOCI, alter the async dispatcher, or force arbitrary
+linker flags to hide Debug/Release mismatches.
+
+## Release security / provenance
+
+The promotion workflow requires an existing successful **push-to-main**
+`ci.yml` run for the exact `GITHUB_SHA`; it verifies the run's SHA,
+completion state, conclusion, event and branch through the GitHub API,
+then downloads `godot-soci-installable` from **that specific run ID**.
+It refuses a missing, failed or stale run. Manual release refuses to publish
+if `main` advanced during promotion. All assets are built and smoke-tested
+before publication; the release ZIP is a byte-for-byte copy of the CI ZIP.
+Artifacts are retained for 90 days, and the release workflow uses
+`actions: read` and `contents: write` permissions.
+
+## Local integration tests
+
+Linux, with a locally built extension and Godot executable in PATH:
 
 ```bash
 docker compose -f demo/postgresql/docker-compose.yml up -d --wait
@@ -16,61 +59,28 @@ bash scripts/run_tests.sh
 docker compose -f demo/postgresql/docker-compose.yml down -v
 ```
 
-## Windows
-
-The independent **`Godot 4.7 integration (Windows)`** workflow
-(`.github/workflows/windows-integration.yml`) runs on `windows-2022`
-on every pull request and push to `main`, completely independently of the
-release packaging workflow. It compiles a native `template_debug` DLL using
-MSVC and pinned vcpkg `x64-windows-static-md`. It starts the runner's
-**preinstalled PostgreSQL 14 service**, then runs all six headless integration
-scripts against real SQLite and PostgreSQL using `scripts/run_windows_tests.ps1`.
-
-The release workflow still builds both debug and release binaries, runs an
-isolated packaged-addon smoke test and assembles ZIPs. It does not substitute
-for the Windows integration workflow. Both CI workflows must pass before
-publishing an addon.
-
-The complete release workflow runs automatically on **every pull request**
-and push to `main`, in addition to version tags and manual runs. It builds
-debug and release GDExtension binaries for both Windows and Linux, smoke-tests
-each installable platform ZIP in a clean Godot project, and checks the merged
-cross-platform ZIP. It uses binary vcpkg caches and a Linux compiler cache to
-reduce repeated work. Separate Windows/Linux runtime-integration jobs continue
-to test the SQL backends directly.
-
-Only a successful `v*` tag can publish a **GitHub prerelease**; pull requests
-and ordinary `main` pushes produce downloadable workflow artifacts, never a
-public release. The PostgreSQL user/password used by Windows integration are
-test-only defaults of the ephemeral hosted runner.
-
-The Windows service is runner-specific. On your own machine, configure
-`GODOT_SOCI_PG` to a disposable local PostgreSQL database and adjust
-service setup in the PowerShell script.
+Windows uses `scripts/run_windows_tests.ps1 -Godot <godot_console.exe>`,
+which copies the addon and test resources to a temporary Godot project.
+The PostgreSQL credentials in CI are **test-only** and must never be
+distributed with a game client.
 
 ## Test matrix
 
-| Test | What it asserts |
+| Test | What it verifies |
 |---|---|
-| `sqlite_test.gd` | Synchronous bind/round-trip, transactions and rollback |
-| `postgresql_test.gd` | Same against PostgreSQL |
-| `async_sqlite_test.gd` | Async request completion, bounded capacity, transaction batches |
-| `async_postgresql_test.gd` | Async PostgreSQL and atomic transaction batches |
-| `sqlite_wal_concurrency_test.gd` | Two native writer dispatchers and one reader using separate WAL-enabled SQLite connections, exact final row count, no duplicate IDs |
-| `async_failure_test.gd` | Failed PostgreSQL connection, rejection at queue capacity, shutdown resolving queued requests |
-| `release_smoke.gd` | Installable addon ZIP works inside a clean Godot project |
+| `sqlite_test.gd` | Synchronous binding, rollback, no `SQLITE_DEBUG` on Windows |
+| `postgresql_test.gd` | Sync behavior against PostgreSQL |
+| `async_sqlite_test.gd` | Awaitable completions, queue capacity and atomic batches |
+| `async_postgresql_test.gd` | PostgreSQL async operations and transactions |
+| `backend_parity_test.gd` | Shared type contracts and BLOB/BYTEA conversion |
+| `sqlite_wal_concurrency_test.gd` | WAL contention across separate connections |
+| `async_failure_test.gd` | Connection failures, backpressure, shutdown behavior |
+| `release_smoke.gd` | Packaged addon loads and operates in a clean Godot project |
+| `test_package_addon.py` | Reproducible cross-platform ZIP merging |
+| `test_windows_sqlite_link.py` | Reject Debug SQLite path / incorrect MSVC CMake config |
 
-Tests intentionally use disposable local data. They are not benchmarks and do
-not measure maximum transactions per second. WAL lets readers and one writer
-proceed concurrently but **does not allow multiple simultaneous SQLite
-writers**; a busy timeout handles ordinary write contention.
-
-## What CI still cannot guarantee
-
-A green job does not prove crash consistency under power loss, malicious input
-resilience, network partitions during COMMIT, real-world concurrency scale, or
-that all distributions have compatible native system libraries. Windows/Linux
-packaging verifies the supported x86_64 build variants only.
-
-For game currency/items use database constraints, operation identifiers,
-state reconciliation and separate load tests.
+Tests intentionally use disposable local data. They are not throughput
+benchmarks and do not establish crash consistency during power loss,
+exactly-once delivery under network partitions or production-economy safety.
+For MMO money/items use database constraints, operation IDs, reconciliation
+and representative concurrent load tests.

@@ -19,6 +19,15 @@ func _run() -> void:
     print("SQLITE TRACE: open SQLite")
     if not _check(db.open("sqlite3", path), db.get_last_error()):
         return
+    # Windows CI must use release-built vcpkg SQLite even for Godot's
+    # template_debug binary. template_debug is an ABI target, not MSVC Debug.
+    if OS.get_name() == "Windows":
+        var options: Dictionary = db.query("SELECT sqlite_compileoption_used('SQLITE_DEBUG') AS enabled")
+        if not _check(options.get("ok", false) and options["rows"].size() == 1,
+                "SQLite build-flag introspection"):
+            return
+        if not _check(int(options["rows"][0]["enabled"]) == 0, "SQLite must not contain SQLITE_DEBUG"):
+            return
     print("SQLITE TRACE: drop table")
     if not _check(db.execute("DROP TABLE IF EXISTS soci_integration")["ok"], "drop"):
         return

@@ -220,6 +220,8 @@ var saved: Dictionary = await db.execute_async(
 
 For reading bytes back, use `SociBinary.select_expression()` and `SociBinary.from_hex()`. See the [complete round-trip example](docs/API.md#portable-blobbytea-round-trip-godot-47). Hex conversion adds overhead; do not use it for large streaming payloads.
 
+**TODO — native binary bindings (future optimization):** Replace the explicit hex helper with transparent `PackedByteArray` parameter/result mapping, e.g. `{"payload": bytes}` and `row["payload"] is PackedByteArray`. SOCI's `blob` maps to SQLite BLOB but PostgreSQL large objects (OID), **not** BYTEA; a correct implementation must handle both backends separately, including empty data, NUL bytes, and large payloads. The current bound hex approach reliably stores real BLOB/BYTEA values, at the cost of ~2× larger transferred parameter/result strings and encoding/decoding CPU. **Not a blocker** for the current addon or the MMO; revisit when real workloads justify optimizing binary storage.
+
 ## Examples and documentation
 
 - [Backend-switch demo](demo/backend_switch.gd) — identical Godot API with SQLite or PostgreSQL.

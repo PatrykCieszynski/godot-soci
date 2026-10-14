@@ -200,8 +200,3 @@ without injecting untrusted values into SQL. This explicit conversion is
 portable but incurs hex encoding overhead; it is not direct native blob binding.
 See [binary usage](docs/API.md#portable-blobbytea-round-trip-godot-47).
 
-## Godot Asset Library submission
-
-We have prepared [submission instructions](docs/ASSET_LIBRARY.md) and a
-listing description. Asset Library publication is **manual** and separate
-from GitHub Releases; do not confuse creating a release with listing approval.

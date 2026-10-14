@@ -27,5 +27,3 @@ For native SQLite `BLOB` and PostgreSQL `BYTEA`, use the optional
 `SociBinary` hexadecimal conversion helper in `binary.gd` and the
 [API reference](docs/API.md) (not transparent direct `PackedByteArray` binding).
 
-The official Asset Library submission is a separate process from GitHub
-Releases; see the [publishing guide](docs/ASSET_LIBRARY.md) in the repository.

@@ -72,6 +72,9 @@ jobs:
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
+      # Share Windows compiler artifacts with windows-integration.yml.
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: 'godot47-soci-pinned-v1'
     steps:
       - uses: actions/checkout@v6
       - name: Install Linux toolchain
@@ -113,6 +116,13 @@ jobs:
           path: .vcpkg-cache
           key: release-vcpkg-${{ matrix.triplet }}-e4563094-v1
 
+      - name: Initialize MSVC for cached Ninja builds
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Share godot-cpp and SOCI compilation cache with Windows integration
+        if: matrix.platform == 'windows'
+        uses: mozilla-actions/sccache-action@v0.0.11
+
       - uses: actions/cache@v5
         if: matrix.platform == 'linux'
         with:
@@ -129,20 +139,41 @@ jobs:
             cmake -S . -B "build-$folder" -G Ninja -DCMAKE_BUILD_TYPE="$type" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET='${{ matrix.triplet }}' -DGODOTCPP_API_VERSION=4.7 -DGODOTCPP_TARGET="$target" -DGODOT_SOCI_WITH_POSTGRESQL=ON
             cmake --build "build-$folder" --parallel 3
           done
-      - name: Build Godot debug and release templates (Windows)
+      - name: Build Godot debug and release templates (Windows, Ninja + sccache)
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
+          & ninja --version
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja is missing on runner' }
           foreach ($type in @('Debug', 'Release')) {
             $target = if ($type -eq 'Debug') { 'template_debug' } else { 'template_release' }
             $folder = 'build-' + $type.ToLowerInvariant()
-            $args = @('-S', '.', '-B', $folder, '-G', 'Visual Studio 17 2022', '-A', 'x64', "-DCMAKE_TOOLCHAIN_FILE=$toolchain", '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}', '-DGODOTCPP_API_VERSION=4.7', "-DGODOTCPP_TARGET=$target", '-DGODOT_SOCI_WITH_POSTGRESQL=ON')
+            # Match the previous Visual Studio '--config Release' build while
+            # retaining the distinct Godot template_debug/template_release ABI.
+            # Using the same flags and SCCACHE_GHA_VERSION as Windows integration
+            # allows reuse of its godot-cpp/SOCI objects across workflow runs.
+            $args = @(
+              '-S', '.', '-B', $folder,
+              '-G', 'Ninja',
+              '-DCMAKE_BUILD_TYPE=Release',
+              '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+              '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
+              "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+              '-DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}',
+              '-DGODOTCPP_API_VERSION=4.7',
+              "-DGODOTCPP_TARGET=$target",
+              '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
+            )
             & cmake @args
             if ($LASTEXITCODE -ne 0) { throw "Configure failed: $type" }
-            cmake --build $folder --config Release --parallel 3
+            cmake --build $folder --parallel 3
             if ($LASTEXITCODE -ne 0) { throw "Build failed: $type" }
           }
+      - name: Windows compilation cache statistics
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: sccache --show-stats
       - name: Show Linux compilation cache stats
         if: matrix.platform == 'linux'
         run: ccache --show-stats

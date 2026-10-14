@@ -22,3 +22,8 @@ Use only in server-side code when connecting to a protected PostgreSQL database.
 `SociAsyncDatabase` should be added to the SceneTree for automatic dispatch.
 
 Full API method signatures, result dictionaries and supported types: [API reference](docs/API.md).
+
+For native SQLite `BLOB` and PostgreSQL `BYTEA`, use the optional
+`SociBinary` hexadecimal conversion helper in `binary.gd` and the
+[API reference](docs/API.md) (not transparent direct `PackedByteArray` binding).
+

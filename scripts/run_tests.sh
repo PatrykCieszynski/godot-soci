@@ -33,6 +33,8 @@ run_test() {
 
 run_test res://tests/sqlite_test.gd "SQLITE INTEGRATION PASS"
 run_test res://tests/async_sqlite_test.gd "ASYNC SQLITE PASS"
+run_test res://tests/backend_parity_test.gd "BACKEND TYPE PARITY PASS"
+run_test res://demo/backend_switch.gd "BACKEND SWITCH DEMO PASS"
 run_test res://tests/sqlite_wal_concurrency_test.gd "SQLITE WAL CONCURRENCY PASS"
 run_test res://tests/async_failure_test.gd "ASYNC FAILURE PATHS PASS"
 run_test res://demo/sqlite/threaded.gd "THREAD DEMO PASS"

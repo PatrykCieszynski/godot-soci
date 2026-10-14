@@ -16,6 +16,7 @@ required = (
     "addons/godot_soci/soci.gdextension",
     "addons/godot_soci/database.gd",
     "addons/godot_soci/async_database.gd",
+    "addons/godot_soci/binary.gd",
     "project.godot",
     "demo/common/demo.tscn",
     "demo/common/demo_scene.gd",
@@ -32,6 +33,11 @@ required = (
     "scripts/run_windows_tests.ps1",
     "docs/API.md",
     "docs/TESTING.md",
+    "tests/backend_parity_test.gd",
+    "demo/backend_switch.gd",
+    "doc_classes/GodotSociDatabase.xml",
+    "doc_classes/SociQueryDispatcher.xml",
+    "doc_classes/SociQueryRequest.xml",
 )
 for rel in required:
     assert (root / rel).is_file(), rel

@@ -67,6 +67,12 @@ add_library(godot_soci SHARED
 )
 target_compile_features(godot_soci PRIVATE cxx_std_17)
 target_include_directories(godot_soci PRIVATE src include)
+# Editor class reference documentation is embedded in the debug GDExtension.
+file(GLOB DOC_XML CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/doc_classes/*.xml")
+if(DOC_XML AND GODOTCPP_TARGET MATCHES "editor|template_debug")
+    target_doc_sources(godot_soci "${DOC_XML}")
+endif()
+
 target_link_libraries(godot_soci PRIVATE godot-cpp Threads::Threads SOCI::SQLite3)
 if(GODOT_SOCI_WITH_POSTGRESQL)
     target_link_libraries(godot_soci PRIVATE SOCI::PostgreSQL)

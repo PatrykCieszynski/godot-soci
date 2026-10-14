@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<class name="SociQueryRequest" inherits="RefCounted" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+    <brief_description>Handle for a scheduled asynchronous SQL operation.</brief_description>
+    <description>Handle for a scheduled asynchronous SQL operation. See res://addons/godot_soci/docs/API.md for usage examples, threading limitations and failure handling.</description>
+    <methods>
+        <method name="is_done">
+            <return type="bool" />
+
+            <description>Whether this request completed, including cancellation.</description>
+        </method>
+        <method name="get_result">
+            <return type="Dictionary" />
+
+            <description>Reads the completion result after is_done() becomes true.</description>
+        </method>
+    </methods>
+    <signals>
+        <signal name="completed">
+            <param index="0" name="result" type="Dictionary" />
+            <description>Emitted when poll() delivers the result on the main thread.</description>
+        </signal>
+    </signals>
+</class>

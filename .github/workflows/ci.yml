@@ -1,0 +1,294 @@
+name: Build and test Godot 4.7 addon
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pull requests compile the debug template only. Main builds both templates
+# and produces the exact artifact later published by release.yml.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Source and packaging validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check layout and package merger
+        run: |
+          python3 scripts/static_check.py
+          python3 -m py_compile scripts/package_addon.py scripts/smoke_release.py scripts/check_windows_sqlite_link.py
+          python3 scripts/test_package_addon.py
+
+  linux:
+    name: Linux SQLite/PostgreSQL + package
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 100
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: demo
+          POSTGRES_PASSWORD: demo
+          POSTGRES_DB: godot_soci_demo
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U demo -d godot_soci_demo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GODOT_SOCI_PG: "host=127.0.0.1 port=55432 dbname=godot_soci_demo user=demo password=demo connect_timeout=3"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Linux toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build git curl unzip zip pkg-config autoconf automake libtool bison flex perl python3 ccache gdb
+      - name: Checkout pinned vcpkg
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout e456309491fd875487bf02b8a0dca76c1b1b00cc
+      - name: Restore vcpkg binary packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-linux-e4563094-v1
+      - name: Install static SQLite and PostgreSQL libraries
+        run: |
+          mkdir -p .vcpkg-cache
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+          ./vcpkg/vcpkg install 'sqlite3:x64-linux' 'libpq:x64-linux'
+      - name: Save vcpkg binary packages
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-linux-e4563094-v1
+      - name: Reuse compiler object cache
+        uses: actions/cache@v5
+        with:
+          path: .ccache
+          key: release-linux-ccache-ubuntu22-v1-${{ hashFiles('CMakeLists.txt') }}
+      - name: Build Godot template_debug
+        run: |
+          cmake -S . -B build-debug -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DGODOTCPP_API_VERSION=4.7 \
+            -DGODOTCPP_TARGET=template_debug -DGODOT_SOCI_WITH_POSTGRESQL=ON
+          cmake --build build-debug --parallel 3
+      - name: Download Godot 4.7.2
+        run: |
+          mkdir -p .bin
+          curl --fail --location --retry 3 -o .bin/godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          unzip -j .bin/godot.zip -d .bin/
+          mv .bin/Godot_v4.7.2-stable_linux.x86_64 .bin/godot
+          chmod +x .bin/godot
+      - name: Run SQLite and PostgreSQL integration on compiled debug DLL
+        run: |
+          # Isolate Godot from vcpkg and 1,000+ generated C++ sources.
+          project="$(mktemp -d)"
+          cp project.godot "$project/"
+          cp -R addons tests demo "$project/"
+          (cd "$project" && GODOT_BIN="$GITHUB_WORKSPACE/.bin/godot" bash "$GITHUB_WORKSPACE/scripts/run_tests.sh")
+      - name: Build Godot template_release (main only)
+        if: github.event_name != 'pull_request'
+        run: |
+          cmake -S . -B build-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-linux -DGODOTCPP_API_VERSION=4.7 \
+            -DGODOTCPP_TARGET=template_release -DGODOT_SOCI_WITH_POSTGRESQL=ON
+          cmake --build build-release --parallel 3
+      - name: Inspect native Linux dependencies
+        if: github.event_name != 'pull_request'
+        run: |
+          for file in addons/godot_soci/bin/linux/*.so; do
+            ldd "$file"
+            if ldd "$file" | grep -E 'libpq\.so|libsqlite3\.so|libssl\.so|libcrypto\.so|not found'; then
+              echo '::error::Release must statically link SQLite/libpq/SSL'
+              exit 1
+            fi
+          done
+      - name: Package and smoke test exactly these Linux binaries
+        if: github.event_name != 'pull_request'
+        run: |
+          python3 scripts/package_addon.py platform --platform linux --out dist/godot-soci-linux.zip --upstream build-debug/_deps --vcpkg-share vcpkg/installed/x64-linux/share
+          python3 scripts/smoke_release.py --zip dist/godot-soci-linux.zip --godot .bin/godot
+      - uses: actions/upload-artifact@v6
+        if: github.event_name != 'pull_request'
+        with:
+          name: addon-linux
+          path: dist/godot-soci-linux.zip
+          if-no-files-found: error
+      - name: Compilation cache statistics
+        if: always()
+        run: ccache --show-stats
+
+  windows:
+    name: Windows SQLite/PostgreSQL + release SQLite verification
+    needs: validate
+    runs-on: windows-2022
+    timeout-minutes: 100
+    env:
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: 'godot47-soci-pinned-v1'
+      VCPKG_DISABLE_METRICS: '1'
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite
+      GODOT_SOCI_PG: 'host=127.0.0.1 port=5432 dbname=postgres user=postgres password=root connect_timeout=3'
+    steps:
+      - uses: actions/checkout@v6
+      - name: Checkout pinned vcpkg
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout e456309491fd875487bf02b8a0dca76c1b1b00cc
+      - name: Restore vcpkg binary packages
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-windows-static-md-e4563094-v1
+      - name: Install pinned static SQLite and PostgreSQL libraries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .vcpkg-cache | Out-Null
+          & .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+          & .\vcpkg\vcpkg.exe install 'sqlite3:x64-windows-static-md' 'libpq:x64-windows-static-md'
+          if ($LASTEXITCODE -ne 0) { throw 'vcpkg install failed' }
+      - name: Save pinned vcpkg binary cache
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .vcpkg-cache
+          key: release-vcpkg-x64-windows-static-md-e4563094-v1
+      - name: Initialize MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Reuse compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.11
+      - name: Compile template_debug against RELEASE vcpkg dependencies
+        shell: pwsh
+        run: |
+          $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
+          & ninja --version
+          if ($LASTEXITCODE -ne 0) { throw 'Ninja is missing on runner' }
+          # GD template_debug is a Godot ABI target, not the CMake Debug configuration.
+          # Use CMake Release with /MD to select vcpkg's optimized lib/, never debug/lib/.
+          $args = @(
+            '-S', '.', '-B', 'build-debug', '-G', 'Ninja',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',
+            '-DGODOTCPP_API_VERSION=4.7',
+            '-DGODOTCPP_TARGET=template_debug',
+            '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw 'Debug-template configure failed' }
+          cmake --build build-debug --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw 'Debug-template build failed' }
+          python scripts/check_windows_sqlite_link.py --build-dir build-debug --flavor debug
+          if ($LASTEXITCODE -ne 0) { throw 'Debug-template SQLite linkage check failed' }
+      - name: Download Godot 4.7.2 for Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .bin | Out-Null
+          curl.exe -fL --retry 3 -o .bin/godot.zip https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_win64.exe.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Godot download failed' }
+          Expand-Archive -Path .bin/godot.zip -DestinationPath .bin -Force
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $godot) { throw 'Godot console executable missing' }
+          & $godot --version
+          if ($LASTEXITCODE -ne 0) { throw 'Godot failed' }
+      - name: Test real SQLite/PostgreSQL with compiled debug template
+        shell: pwsh
+        run: |
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          & ./scripts/run_windows_tests.ps1 -Godot "$godot"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows integration failed' }
+      - name: Compile template_release against RELEASE vcpkg dependencies
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          $toolchain = (Resolve-Path vcpkg/scripts/buildsystems/vcpkg.cmake).Path
+          $args = @(
+            '-S', '.', '-B', 'build-release', '-G', 'Ninja',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain",
+            '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',
+            '-DGODOTCPP_API_VERSION=4.7',
+            '-DGODOTCPP_TARGET=template_release',
+            '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
+          )
+          & cmake @args
+          if ($LASTEXITCODE -ne 0) { throw 'Release-template configure failed' }
+          cmake --build build-release --parallel 3
+          if ($LASTEXITCODE -ne 0) { throw 'Release-template build failed' }
+          python scripts/check_windows_sqlite_link.py --build-dir build-release --flavor release
+          if ($LASTEXITCODE -ne 0) { throw 'Release-template SQLite linkage check failed' }
+      - name: Package and smoke test exactly these Windows binaries
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          python scripts/package_addon.py platform --platform windows --out dist/godot-soci-windows.zip --upstream build-debug/_deps --vcpkg-share vcpkg/installed/x64-windows-static-md/share
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+          $godot = Get-ChildItem .bin -Filter '*console.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          python scripts/smoke_release.py --zip dist/godot-soci-windows.zip --godot "$godot"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows smoke test failed' }
+      - uses: actions/upload-artifact@v6
+        if: github.event_name != 'pull_request'
+        with:
+          name: addon-windows
+          path: dist/godot-soci-windows.zip
+          if-no-files-found: error
+      - name: Compilation cache statistics
+        if: always()
+        shell: pwsh
+        run: sccache --show-stats
+
+  combine:
+    name: Assemble reusable installable addon
+    if: github.event_name != 'pull_request'
+    needs: [linux, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v6
+        with:
+          name: addon-linux
+          path: dist/parts
+      - uses: actions/download-artifact@v6
+        with:
+          name: addon-windows
+          path: dist/parts
+      - name: Merge tested native binaries into one reproducible ZIP
+        run: |
+          python3 scripts/package_addon.py combine --linux dist/parts/godot-soci-linux.zip --windows dist/parts/godot-soci-windows.zip --out dist/godot-soci-installable.zip
+      - uses: actions/upload-artifact@v6
+        with:
+          name: godot-soci-installable
+          path: dist/godot-soci-installable.zip
+          if-no-files-found: error
+          retention-days: 90

@@ -26,6 +26,7 @@ jobs:
           python3 scripts/static_check.py
           python3 -m py_compile scripts/package_addon.py scripts/smoke_release.py scripts/check_windows_sqlite_link.py
           python3 scripts/test_package_addon.py
+          python3 scripts/test_windows_sqlite_link.py
 
   linux:
     name: Linux SQLite/PostgreSQL + package

@@ -12,8 +12,7 @@ New-Item -ItemType Directory -Force -Path $script:TestProject | Out-Null
 Copy-Item -LiteralPath 'project.godot' -Destination $script:TestProject
 Copy-Item -LiteralPath 'addons' -Destination (Join-Path $script:TestProject 'addons') -Recurse
 Copy-Item -LiteralPath 'tests' -Destination (Join-Path $script:TestProject 'tests') -Recurse
-New-Item -ItemType Directory -Force -Path (Join-Path $script:TestProject 'demo') | Out-Null
-Copy-Item -LiteralPath 'demo/backend_switch.gd' -Destination (Join-Path $script:TestProject 'demo/backend_switch.gd')
+Copy-Item -LiteralPath 'demo' -Destination (Join-Path $script:TestProject 'demo') -Recurse
 Write-Host "Windows native CI project: $script:TestProject"
 
 function Invoke-GodotBounded {

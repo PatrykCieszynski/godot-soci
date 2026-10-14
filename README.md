@@ -2,9 +2,7 @@
 
 **SQLite and PostgreSQL for Godot 4.7+ — one GDScript API, native C++ execution.**
 
-[![Linux CI](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/linux-build.yml/badge.svg)](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/linux-build.yml)
-[![Windows CI](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/windows-integration.yml/badge.svg)](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/windows-integration.yml)
-[![Package CI](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/release.yml/badge.svg)](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/release.yml)
+[![Build and tests](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/ci.yml/badge.svg)](https://github.com/PatrykCieszynski/godot-soci/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Godot 4.7+](https://img.shields.io/badge/Godot-4.7%2B-478CBF)
 
@@ -251,7 +249,29 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_API_VERSION=4.7 -DGODOT_
 cmake --build build --parallel 4
 ```
 
-The GitHub Actions packaging workflow builds and smoke-tests **Debug + Release** native binaries for Linux and Windows. Maintainers can publish a version from **Actions → Package Godot 4.7 addon → Run workflow** on `main`, enter a tag like `v0.4.0`, then let the workflow build, test and publish a GitHub prerelease and tag. It also supports a manually pushed `v*` tag.
+GitHub Actions uses one [CI workflow](.github/workflows/ci.yml): pull requests
+build and test Godot `template_debug` on both Linux and Windows; merges to
+`main` additionally build `template_release`, smoke-test installable platform
+ZIPs and assemble a downloadable `godot-soci-installable` artifact. The **same
+native binaries** pass integration and package tests before publication.
+
+[Publishing](.github/workflows/release.yml) is a separate, fast **artifact
+promotion** workflow: after a successful `main` CI run, choose **Actions →
+Publish tested Godot SOCI addon → Run workflow**, select `main`, and supply
+a new version like `v0.4.1`. It finds the successful `main` CI artifact
+for the **exact SHA** being released, creates the tag and GitHub prerelease,
+and uploads the unchanged ZIP without recompiling it. Pushing a new `v*`
+tag at an already-tested commit on `main` is also supported.
+Artifacts expire after 90 days; if one is missing, run CI again on the
+intended commit before publishing.
+
+**Windows release guarantee:** Godot's `template_debug` and
+`template_release` are distinct engine target variants, not CMake
+Debug/Release library selections. CI builds both with
+`CMAKE_BUILD_TYPE=Release` and `x64-windows-static-md`, validates the DLL
+link command uses `vcpkg/installed/.../lib/sqlite3.lib` rather than
+`debug/lib/sqlite3.lib`, and checks `sqlite_compileoption_used('SQLITE_DEBUG')`
+in the real engine. No SOCI or worker-thread modifications are needed.
 
 ## License
 

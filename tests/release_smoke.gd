@@ -22,6 +22,11 @@ func _run() -> void:
     if not native_db.open("sqlite3", ":memory:"):
         _failure("Native SQLite open: " + native_db.get_last_error())
         return
+    if OS.get_name() == "Windows":
+        var optimized: Dictionary = native_db.query("SELECT sqlite_compileoption_used('SQLITE_DEBUG') AS enabled")
+        if not optimized.get("ok", false) or optimized["rows"].size() != 1 or int(optimized["rows"][0]["enabled"]) != 0:
+            _failure("Packaged Windows SQLite must not define SQLITE_DEBUG: " + str(optimized))
+            return
     var native_result: Dictionary = native_db.query("SELECT 42 AS answer")
     if not native_result.get("ok", false) or int(native_result["rows"][0]["answer"]) != 42:
         _failure("Native SQL test: " + str(native_result))

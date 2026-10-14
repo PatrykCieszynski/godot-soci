@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import subprocess
 
 TRIPLET = "x64-windows-static-md"
@@ -21,7 +22,7 @@ DEBUG_LIBRARY = f"vcpkg/installed/{TRIPLET}/debug/lib/sqlite3.lib"
 def verify(cache: str, commands: str, flavor: str) -> None:
     if "CMAKE_BUILD_TYPE:STRING=Release" not in cache:
         raise RuntimeError("Windows template must use CMAKE_BUILD_TYPE=Release")
-    if f"VCPKG_TARGET_TRIPLET:STRING={TRIPLET}" not in cache:
+    if not re.search(rf"(?m)^VCPKG_TARGET_TRIPLET:(?:STRING|UNINITIALIZED)={TRIPLET}$", cache):
         raise RuntimeError(f"Windows must use vcpkg {TRIPLET}")
 
     dll = f"godot_soci.windows.template_{flavor}.x86_64.dll"

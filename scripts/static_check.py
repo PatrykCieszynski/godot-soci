@@ -4,6 +4,10 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 required = (
     "CMakeLists.txt",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    "scripts/check_windows_sqlite_link.py",
+    "scripts/test_windows_sqlite_link.py",
     "include/godot_soci/database.h",
     "src/database.cpp",
     "src/register_types.cpp",
@@ -49,6 +53,15 @@ assert 'compatibility_minimum = "4.7"' in manifest
 assert "Duplicate SQL result column name" in source
 assert "src/database.cpp" in cmake
 assert "target_include_directories(godot_soci PRIVATE src include)" in cmake
+assert not (root / ".github/workflows/linux-build.yml").exists()
+assert not (root / ".github/workflows/windows-integration.yml").exists()
+ci_workflow = (root / ".github/workflows/ci.yml").read_text()
+publish_workflow = (root / ".github/workflows/release.yml").read_text()
+assert "godot-soci-installable" in ci_workflow
+assert "actions/download-artifact@v6" in publish_workflow
+assert "head_sha" in publish_workflow and "conclusion" in publish_workflow
+assert "cmake --build" not in publish_workflow
+
 for path in (root / "demo").rglob("*.gd"):
     assert "\t" not in path.read_text(), path
 print("STATIC SOURCE LAYOUT PASS (not a substitute for Godot integration tests)")

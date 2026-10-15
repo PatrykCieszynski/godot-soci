@@ -86,6 +86,66 @@ func _run() -> void:
         return
     bounded.stop()
 
+    # Repeated bursts exercise accounting across many poll/submit cycles,
+    # without asserting CPU-dependent timing thresholds.
+    var stress := SociQueryDispatcher.new()
+    if not _check(stress.start("sqlite3", ":memory:", 32), "Stress worker start"):
+        return
+    for wave in 20:
+        var wave_requests: Array = []
+        for i in 24:
+            var request: SociQueryRequest = stress.query_async(
+                "SELECT :n AS n", {"n": wave * 24 + i}
+            )
+            if not _check(request != null, "Stress submission wave %d item %d" % [wave, i]):
+                return
+            wave_requests.append(request)
+        var deadline := Time.get_ticks_msec() + 10000
+        while Time.get_ticks_msec() < deadline:
+            stress.poll(32)
+            var wave_complete := true
+            for request in wave_requests:
+                if not request.is_done():
+                    wave_complete = false
+                    break
+            if wave_complete:
+                break
+            await process_frame
+        for i in wave_requests.size():
+            var response: Dictionary = wave_requests[i].get_result()
+            if not _check(wave_requests[i].is_done() and response.get("ok", false) and
+                    response["rows"][0]["n"] == wave * 24 + i,
+                    "Stress response wave %d item %d: %s" % [wave, i, str(response)]):
+                return
+    var stress_stats: Dictionary = stress.get_stats()
+    if not _check(stress_stats["submitted"] == 480 and stress_stats["completed"] == 480 and
+            stress_stats["failed"] == 0 and stress_stats["rejected"] == 0 and
+            stress_stats["pending"] == 0 and stress_stats["avg_queue_ms"] >= 0.0 and
+            stress_stats["avg_execution_ms"] >= 0.0,
+            "Stress accounting: " + str(stress_stats)):
+        return
+
+    # A SQL error is a completed failed request, not a rejected submission,
+    # and must not mark an otherwise healthy SQLite connection disconnected.
+    var invalid: SociQueryRequest = stress.execute_async("THIS IS NOT SQL")
+    if not _check(invalid != null, "Invalid SQL is submitted"):
+        return
+    var invalid_deadline := Time.get_ticks_msec() + 5000
+    while not invalid.is_done() and Time.get_ticks_msec() < invalid_deadline:
+        stress.poll()
+        await process_frame
+    var errors: Dictionary = stress.get_stats()
+    if not _check(invalid.is_done() and not invalid.get_result().get("ok", true) and
+            errors["submitted"] == 481 and errors["completed"] == 481 and
+            errors["failed"] == 1 and errors["rejected"] == 0 and
+            stress.get_connection_state() == "connected",
+            "Failed query accounting: " + str(errors)):
+        return
+    stress.stop()
+    if not _check(stress.get_stats()["completed"] == 481 and
+            stress.get_stats()["pending"] == 0, "Stop must preserve completed counters"):
+        return
+
     # Connection failure must be distinguishable from an active thread.
     var missing := SociAsyncDatabase.new()
     root.add_child(missing)

@@ -184,8 +184,8 @@ bool SociQueryDispatcher::is_started() const { return started_; }
 int SociQueryDispatcher::pending() const { return static_cast<int>(requests_.size()); }
 String SociQueryDispatcher::get_last_error() const { return last_error_; }
 
-String SociQueryDispatcher::get_connection_state() const {
-    switch (connection_state_.load()) {
+String SociQueryDispatcher::state_name(ConnectionState state) {
+    switch (state) {
         case ConnectionState::Connecting: return "connecting";
         case ConnectionState::Connected: return "connected";
         case ConnectionState::Failed: return "failed";
@@ -195,11 +195,17 @@ String SociQueryDispatcher::get_connection_state() const {
     return "stopped";
 }
 
+String SociQueryDispatcher::get_connection_state() const {
+    return state_name(connection_state_.load());
+}
+
 void SociQueryDispatcher::announce_connection_change() {
     const ConnectionState current = connection_state_.load();
     if (current == announced_state_) return;
+    // Use the same atomic snapshot for bookkeeping AND the payload. The
+    // worker can change the connection state between these two operations.
     announced_state_ = current;
-    emit_signal("connection_state_changed", get_connection_state());
+    emit_signal("connection_state_changed", state_name(current));
 }
 
 Dictionary SociQueryDispatcher::get_stats() {

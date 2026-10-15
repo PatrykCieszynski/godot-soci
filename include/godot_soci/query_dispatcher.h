@@ -33,6 +33,7 @@ class SociQueryDispatcher final : public RefCounted {
     std::atomic<ConnectionState> connection_state_{ConnectionState::Stopped};
     ConnectionState announced_state_ = ConnectionState::Stopped;
     // The SQL worker only stores an enum; Godot signals are emitted on the main thread.
+    static String state_name(ConnectionState state);
     void announce_connection_change();
 
     // Only accessed from the Godot main thread.

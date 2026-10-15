@@ -95,7 +95,7 @@ func _run() -> void:
         var wave_requests: Array = []
         for i in 24:
             var request: SociQueryRequest = stress.query_async(
-                "SELECT :n AS n", {"n": wave * 24 + i}
+                "SELECT CAST(:n AS INTEGER) AS n", {"n": wave * 24 + i}
             )
             if not _check(request != null, "Stress submission wave %d item %d" % [wave, i]):
                 return

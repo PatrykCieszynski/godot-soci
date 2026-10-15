@@ -11,6 +11,7 @@
 #include <soci/postgresql/soci-postgresql.h>
 #endif
 
+#include <chrono>
 #include <cctype>
 #include <cmath>
 #include <exception>
@@ -126,6 +127,9 @@ void SociQueryDispatcher::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_started"), &SociQueryDispatcher::is_started);
     ClassDB::bind_method(D_METHOD("pending"), &SociQueryDispatcher::pending);
     ClassDB::bind_method(D_METHOD("get_last_error"), &SociQueryDispatcher::get_last_error);
+    ClassDB::bind_method(D_METHOD("get_connection_state"), &SociQueryDispatcher::get_connection_state);
+    ClassDB::bind_method(D_METHOD("get_stats"), &SociQueryDispatcher::get_stats);
+    ADD_SIGNAL(MethodInfo("connection_state_changed", PropertyInfo(Variant::STRING, "state")));
     ClassDB::bind_method(D_METHOD("query_async", "sql", "params", "max_rows"),
                          &SociQueryDispatcher::query_async, DEFVAL(Dictionary()), DEFVAL(1000));
     ClassDB::bind_method(D_METHOD("execute_async", "sql", "params"),
@@ -159,14 +163,19 @@ bool SociQueryDispatcher::start(const String &backend, const String &connection,
         return false;
     }
     max_pending_ = static_cast<size_t>(max_pending);
+    submitted_count_ = completed_count_ = failed_count_ = rejected_count_ = canceled_count_ = 0;
+    total_queue_ms_ = total_execution_ms_ = total_delivery_ms_ = 0;
+    connection_state_.store(ConnectionState::Connecting);
     stopping_ = false;
     last_error_ = "";
     try {
         worker_ = std::thread(&SociQueryDispatcher::worker_main, this, utf8(backend), utf8(connection));
         started_ = true;
+        announce_connection_change();
         return true;
     } catch (const std::exception &error) {
         last_error_ = to_godot(redact(error.what()));
+        connection_state_.store(ConnectionState::Stopped);
         return false;
     }
 }
@@ -175,22 +184,78 @@ bool SociQueryDispatcher::is_started() const { return started_; }
 int SociQueryDispatcher::pending() const { return static_cast<int>(requests_.size()); }
 String SociQueryDispatcher::get_last_error() const { return last_error_; }
 
+String SociQueryDispatcher::state_name(ConnectionState state) {
+    switch (state) {
+        case ConnectionState::Connecting: return "connecting";
+        case ConnectionState::Connected: return "connected";
+        case ConnectionState::Failed: return "failed";
+        case ConnectionState::Disconnected: return "disconnected";
+        case ConnectionState::Stopped: return "stopped";
+    }
+    return "stopped";
+}
+
+String SociQueryDispatcher::get_connection_state() const {
+    return state_name(connection_state_.load());
+}
+
+void SociQueryDispatcher::announce_connection_change() {
+    const ConnectionState current = connection_state_.load();
+    if (current == announced_state_) return;
+    // Use the same atomic snapshot for bookkeeping AND the payload. The
+    // worker can change the connection state between these two operations.
+    announced_state_ = current;
+    emit_signal("connection_state_changed", state_name(current));
+}
+
+Dictionary SociQueryDispatcher::get_stats() {
+    // Called on the Godot main thread only. Do not inspect Godot objects from
+    // the worker thread, and never hold the mutex while creating Variants.
+    size_t queued = 0, awaiting_poll = 0, executing = 0;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queued = queue_.size();
+        awaiting_poll = completions_.size();
+        executing = executing_;
+    }
+    Dictionary stats;
+    stats["connection_state"] = get_connection_state();
+    stats["pending"] = static_cast<int64_t>(requests_.size());
+    stats["queued"] = static_cast<int64_t>(queued);
+    stats["executing"] = static_cast<int64_t>(executing);
+    stats["awaiting_poll"] = static_cast<int64_t>(awaiting_poll);
+    stats["submitted"] = static_cast<int64_t>(submitted_count_);
+    stats["completed"] = static_cast<int64_t>(completed_count_);
+    stats["failed"] = static_cast<int64_t>(failed_count_);
+    stats["rejected"] = static_cast<int64_t>(rejected_count_);
+    stats["canceled"] = static_cast<int64_t>(canceled_count_);
+    const double n = completed_count_ ? static_cast<double>(completed_count_) : 1.0;
+    stats["avg_queue_ms"] = total_queue_ms_ / n;
+    stats["avg_execution_ms"] = total_execution_ms_ / n;
+    stats["avg_delivery_ms"] = total_delivery_ms_ / n;
+    return stats;
+}
+
 Ref<SociQueryRequest> SociQueryDispatcher::submit(bool query, const String &sql,
                                                    const Dictionary &params, int max_rows) {
     if (!started_) {
         last_error_ = "Dispatcher is not started.";
+        ++rejected_count_;
         return {};
     }
     if (requests_.size() >= max_pending_) {
         last_error_ = "Async dispatcher capacity exceeded (backpressure).";
+        ++rejected_count_;
         return {};
     }
     if (query && (max_rows < 1 || max_rows > 100000)) {
         last_error_ = "max_rows must be between 1 and 100000.";
+        ++rejected_count_;
         return {};
     }
     godot_soci::Job job;
     job.id = next_id_++;
+    job.enqueued_at = std::chrono::steady_clock::now();
     job.query = query;
     job.sql = utf8(sql);
     job.max_rows = max_rows;
@@ -205,12 +270,14 @@ Ref<SociQueryRequest> SociQueryDispatcher::submit(bool query, const String &sql,
         }
     } catch (const std::exception &error) {
         last_error_ = to_godot(error.what());
+        ++rejected_count_;
         return {};
     }
 
     Ref<SociQueryRequest> request;
     request.instantiate();
     requests_.emplace(job.id, request);
+    ++submitted_count_;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push_back(std::move(job));
@@ -232,19 +299,23 @@ Ref<SociQueryRequest> SociQueryDispatcher::execute_async(const String &sql, cons
 Ref<SociQueryRequest> SociQueryDispatcher::transaction_async(const Array &statements) {
     if (!started_) {
         last_error_ = "Dispatcher is not started.";
+        ++rejected_count_;
         return {};
     }
     if (requests_.size() >= max_pending_) {
         last_error_ = "Async dispatcher capacity exceeded (backpressure).";
+        ++rejected_count_;
         return {};
     }
     if (statements.is_empty() || statements.size() > 128) {
         last_error_ = "Transaction requires between 1 and 128 statements.";
+        ++rejected_count_;
         return {};
     }
 
     godot_soci::Job job;
     job.id = next_id_++;
+    job.enqueued_at = std::chrono::steady_clock::now();
     job.transaction = true;
     try {
         for (int index = 0; index < statements.size(); ++index) {
@@ -301,12 +372,14 @@ Ref<SociQueryRequest> SociQueryDispatcher::transaction_async(const Array &statem
         }
     } catch (const std::exception &error) {
         last_error_ = to_godot(error.what());
+        ++rejected_count_;
         return {};
     }
 
     Ref<SociQueryRequest> request;
     request.instantiate();
     requests_.emplace(job.id, request);
+    ++submitted_count_;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push_back(std::move(job));
@@ -327,10 +400,13 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
             session = std::make_unique<soci::session>(soci::postgresql, connection);
 #endif
         }
+        connection_state_.store(ConnectionState::Connected);
     } catch (const std::exception &error) {
         connection_error = "Failed to open database: " + redact(error.what());
+        connection_state_.store(ConnectionState::Failed);
     } catch (...) {
         connection_error = "Failed to open database: non-standard native exception.";
+        connection_state_.store(ConnectionState::Failed);
     }
 
     for (;;) {
@@ -341,25 +417,41 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
             if (stopping_) return;
             job = std::move(queue_.front());
             queue_.pop_front();
+            executing_ = 1;
         }
 
+        const auto started_at = std::chrono::steady_clock::now();
         godot_soci::Completion completed;
-        if (session) {
+        if (session && connection_state_.load() == ConnectionState::Connected) {
             completed = godot_soci::QueryWorker::run(job, *session);
+            // SOCI owns the PostgreSQL ping and backend-specific connection
+            // health check. Run it on *failure only*, never on every query.
+            if (!completed.ok && !session->is_connected()) {
+                connection_state_.store(ConnectionState::Disconnected);
+            }
         } else {
             completed.id = job.id;
             completed.query = job.query;
             completed.transaction = job.transaction;
-            completed.error = connection_error.empty() ? "Database unavailable." : connection_error;
+            completed.error = connection_state_.load() == ConnectionState::Disconnected
+                ? "Database connection was lost; stop and start a new session."
+                : (connection_error.empty() ? "Database unavailable." : connection_error);
         }
+        completed.finished_at = std::chrono::steady_clock::now();
+        completed.queue_ms = std::chrono::duration<double, std::milli>(
+            started_at - job.enqueued_at).count();
+        completed.execution_ms = std::chrono::duration<double, std::milli>(
+            completed.finished_at - started_at).count();
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            executing_ = 0;
             completions_.push_back(std::move(completed));
         }
     }
 }
 
 int SociQueryDispatcher::poll(int max_completions) {
+    announce_connection_change();
     if (max_completions <= 0) return 0;
     std::deque<godot_soci::Completion> delivered;
     {
@@ -378,6 +470,12 @@ int SociQueryDispatcher::poll(int max_completions) {
         if (it == requests_.end()) continue;
         Ref<SociQueryRequest> request = it->second;
         requests_.erase(it);
+        ++completed_count_;
+        if (!completed.ok) ++failed_count_;
+        total_queue_ms_ += completed.queue_ms;
+        total_execution_ms_ += completed.execution_ms;
+        total_delivery_ms_ += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - completed.finished_at).count();
         ready.emplace_back(request, as_dictionary(completed));
     }
     for (auto &entry : ready) entry.first->resolve(entry.second);
@@ -411,6 +509,12 @@ void SociQueryDispatcher::stop() {
         if (it == requests_.end()) continue;
         Ref<SociQueryRequest> request = it->second;
         requests_.erase(it);
+        ++completed_count_;
+        if (!completed.ok) ++failed_count_;
+        total_queue_ms_ += completed.queue_ms;
+        total_execution_ms_ += completed.execution_ms;
+        total_delivery_ms_ += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - completed.finished_at).count();
         request->resolve(as_dictionary(completed));
     }
 
@@ -426,8 +530,11 @@ void SociQueryDispatcher::stop() {
     cancelled["affected_rows_per_statement"] = Array();
     cancelled["rows"] = Array();
     cancelled["truncated"] = false;
+    canceled_count_ += outstanding.size();
     for (auto &entry : outstanding) entry.second->resolve(cancelled);
     stopping_ = false;
+    connection_state_.store(ConnectionState::Stopped);
+    announce_connection_change();
 }
 
 } // namespace godot

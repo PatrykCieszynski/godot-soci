@@ -77,6 +77,7 @@ $tests = @(
     @{ Name = 'async_sqlite_test.gd'; Marker = 'ASYNC SQLITE PASS' },
     @{ Name = 'sqlite_wal_concurrency_test.gd'; Marker = 'SQLITE WAL CONCURRENCY PASS' },
     @{ Name = 'async_failure_test.gd'; Marker = 'ASYNC FAILURE PATHS PASS' },
+    @{ Name = 'async_observability_test.gd'; Marker = 'ASYNC OBSERVABILITY PASS' },
     @{ Name = 'postgresql_test.gd'; Marker = 'POSTGRESQL INTEGRATION PASS' },
     @{ Name = 'async_postgresql_test.gd'; Marker = 'ASYNC POSTGRESQL PASS' },
     @{ Name = 'backend_parity_test.gd'; Marker = 'BACKEND TYPE PARITY PASS' }

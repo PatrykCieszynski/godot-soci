@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -33,6 +34,7 @@ struct Job {
     bool transaction = false;
     std::vector<BatchStatement> statements;
     uint64_t id = 0;
+    std::chrono::steady_clock::time_point enqueued_at{};
     bool query = false;
     int max_rows = 1000;
     std::string sql;
@@ -48,6 +50,9 @@ struct Completion {
     uint64_t id = 0;
     bool query = false;
     bool ok = false;
+    double queue_ms = 0;
+    double execution_ms = 0;
+    std::chrono::steady_clock::time_point finished_at{};
     bool truncated = false;
     int64_t affected_rows = 0;
     std::string error;

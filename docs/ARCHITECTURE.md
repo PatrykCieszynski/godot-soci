@@ -1,4 +1,4 @@
-# Architecture (v0.3)
+# Architecture (v0.5)
 
 `GodotSociDatabase` remains the synchronous, single-owner SOCI connection. It is unchanged and supports explicit transactions.
 
@@ -46,7 +46,30 @@ the client must reconcile rather than retry an economy mutation.
 This avoids session-affinity problems from interleaving a long-lived transaction
 with unrelated jobs. Long-lived interactive transactions remain unsupported.
 
-## Deliberate v0.3 limitations
+## Connection state and worker statistics (v0.5)
+
+The SOCI session remains entirely worker-owned. An atomic native enum
+carries only its observed state: `stopped`, `connecting`, `connected`,
+`failed`, or `disconnected`. Godot reads the state and emits
+`connection_state_changed(state)` **only on the main thread**.
+Because workers change state between frames, short intermediate states
+may be skipped by polling.
+
+After failed SQL operations, the worker invokes SOCI's `is_connected()`;
+it never pings for each successful SQL call. Initial connection failures
+set `failed`; confirmed session loss sets `disconnected`. Neither
+condition causes silent SQL retries or reconnects. Restart is explicit;
+ambiguous mutations require application-level reconciliation.
+
+`get_stats()` snapshots pending/queued/executing/awaiting-poll operations
+and cumulative submitted/completed/failed/rejected/canceled counts. Its
+queue-wait, SQL-execution and completion-to-delivery averages measure
+observed durations in milliseconds. The pending cap includes finished
+but undelivered requests; it is a *count* limit, not a byte limit.
+Counters reset when a new worker starts and remain readable after stop.
+No SQL or credentials are stored in these metrics.
+
+## Deliberate v0.5 limitations
 
 - Single worker per dispatcher, no parallel SQL within one dispatcher.
 - Supports atomic async batches, but not long-lived interactive transactions or session-pinned transaction handles. The synchronous driver remains available for complex transactional operations on an explicitly owned connection.

@@ -1,4 +1,4 @@
-# API reference — godot-soci 0.3.1 (Godot 4.7+)
+# API reference — godot-soci 0.5 (unreleased, Godot 4.7+)
 
 This documents the **current public API**, not planned connection-pool features.
 Native classes are registered by `soci.gdextension`; `SociDatabase` and
@@ -71,6 +71,9 @@ the internal transaction flag.
 | `pending()` | `int` | All not-yet-delivered requests (queued + executing + waiting for poll). |
 | `get_last_error()` | `String` | Most recent scheduling/configuration error. |
 | `is_started()` | `bool` | Worker was started, *not* proof of a live SQL session. |
+| `get_connection_state()` | `String` | Native worker state: stopped, connecting, connected, failed, disconnected. |
+| `get_stats()` | `Dictionary` | Request backlog and average queue/execution/delivery times in ms. |
+| `connection_state_changed(state)` | signal | Main-thread notification for observed changes; may skip brief states. |
 | `stop()` | `void` | Drops queued tasks, joins worker and resolves outstanding requests; **may block**. |
 
 Every dispatcher owns **one** long-lived SOCI worker/session and has a bounded
@@ -117,6 +120,31 @@ The wrapper supports `start/stop/is_started/pending/get_last_error`,
 `query_async`, `execute_async` and `transaction_async`. If the native queue
 rejects a request, the wrapper yields no result and instead returns an immediate
 `{"ok": false, "error": "..."}` dictionary of the same basic shape.
+
+## Async observability (v0.5)
+
+`SociAsyncDatabase` forwards the native `get_connection_state()`,
+`get_stats()` and `connection_state_changed(state: String)`.
+
+```gdscript
+db.connection_state_changed.connect(func(state: String):
+    print("Database: ", state))
+print(db.get_stats())
+```
+
+The statistics dictionary contains `connection_state`, `pending`,
+`queued`, `executing`, `awaiting_poll`, `submitted`, `completed`,
+`failed`, `rejected`, `canceled`, `avg_queue_ms`,
+`avg_execution_ms`, and `avg_delivery_ms`. Completed includes failed
+SQL responses, but not operations canceled before they ran. Counters
+reset at start; averages are zero until the first delivered completion.
+
+An asynchronous initial connection failure sets `failed`; a query
+failure with a failed SOCI liveness check sets `disconnected`.
+The worker does **not** automatically reconnect or retry. State
+notifications are delivered only on the main thread, so very short
+intermediate states may be skipped. For ambiguous financial or item
+updates, reconcile using application operation IDs before retrying.
 
 ## Atomic asynchronous batches
 

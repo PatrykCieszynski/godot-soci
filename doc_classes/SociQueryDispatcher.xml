@@ -25,6 +25,14 @@
 
             <description>Number of queued, executing and not-yet-delivered requests.</description>
         </method>
+        <method name="get_connection_state">
+            <return type="String" />
+            <description>Last observed session state: stopped, connecting, connected, failed or disconnected. Does not automatically reconnect.</description>
+        </method>
+        <method name="get_stats">
+            <return type="Dictionary" />
+            <description>Backlog counters and average native queue, execution and delivery delays in milliseconds.</description>
+        </method>
         <method name="get_last_error">
             <return type="String" />
 
@@ -54,5 +62,11 @@
             <description>Delivers up to max_completions finished requests on the main thread.</description>
         </method>
     </methods>
+    <signals>
+        <signal name="connection_state_changed">
+            <param index="0" name="state" type="String" />
+            <description>Main-thread notification when the observed worker state changes. Short intermediate states may be skipped.</description>
+        </signal>
+    </signals>
 
 </class>

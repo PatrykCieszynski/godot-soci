@@ -114,7 +114,7 @@ func _run() -> void:
         for i in wave_requests.size():
             var response: Dictionary = wave_requests[i].get_result()
             if not _check(wave_requests[i].is_done() and response.get("ok", false) and
-                    response["rows"][0]["n"] == wave * 24 + i,
+                    int(response["rows"][0]["n"]) == wave * 24 + i,
                     "Stress response wave %d item %d: %s" % [wave, i, str(response)]):
                 return
     var stress_stats: Dictionary = stress.get_stats()

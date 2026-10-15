@@ -2,6 +2,13 @@
 
 #include <soci/soci.h>
 
+// godot-cpp exposes _HAS_EXCEPTIONS through its PUBLIC compile definitions.
+// On MSVC that must agree with SOCI's exception-enabled STL ABI; /EHsc alone
+// is insufficient if _HAS_EXCEPTIONS=0 leaked from godot-cpp.
+#if defined(_MSC_VER) && defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS
+#error "godot-soci requires _HAS_EXCEPTIONS=1; disable GODOTCPP_DISABLE_EXCEPTIONS on MSVC."
+#endif
+
 #include <cmath>
 #include <cstdint>
 #include <ctime>
@@ -136,6 +143,25 @@ Row copy_row(const soci::row &record) {
 
 } // namespace
 
+NativeError QueryWorker::describe_error(const soci::soci_error &error) {
+    NativeError details;
+    const auto category = error.get_error_category();
+    switch (category) {
+        case soci::soci_error::connection_error: details.category = "connection_error"; break;
+        case soci::soci_error::invalid_statement: details.category = "invalid_statement"; break;
+        case soci::soci_error::no_privilege: details.category = "no_privilege"; break;
+        case soci::soci_error::no_data: details.category = "no_data"; break;
+        case soci::soci_error::constraint_violation: details.category = "constraint_violation"; break;
+        case soci::soci_error::unknown_transaction_state: details.category = "unknown_transaction_state"; break;
+        case soci::soci_error::system_error: details.category = "system_error"; break;
+        case soci::soci_error::unknown: details.category = "unknown"; break;
+    }
+    details.backend = error.get_backend_name();
+    details.backend_code = error.get_backend_error_code();
+    details.sqlstate = error.get_sqlstate();
+    return details;
+}
+
 Completion QueryWorker::run(const Job &job, soci::session &session) {
     Completion result;
     result.id = job.id;
@@ -191,6 +217,13 @@ Completion QueryWorker::run(const Job &job, soci::session &session) {
             result.affected_rows = static_cast<int64_t>(statement.get_affected_rows());
         }
         result.ok = true;
+    } catch (const soci::soci_error &error) {
+        if (job.transaction && !result.outcome_unknown) {
+            result.affected_rows = 0;
+            result.affected_rows_per_statement.clear();
+        }
+        result.error = redact(error.what());
+        result.native_error = describe_error(error);
     } catch (const std::exception &error) {
         if (job.transaction && !result.outcome_unknown) {
             // An uncommitted batch rolled back; do not report provisional row counts.

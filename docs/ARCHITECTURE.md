@@ -69,6 +69,12 @@ but undelivered requests; it is a *count* limit, not a byte limit.
 Counters reset when a new worker starts and remain readable after stop.
 No SQL or credentials are stored in these metrics.
 
+Failed native async completions may also include the original SOCI error
+category, backend name, SQLite error code and PostgreSQL SQLSTATE. Those are
+captured as plain C++ scalars on the worker and converted to Godot Variants
+only during main-thread delivery. The connector does not translate every
+database error into an invented driver-neutral taxonomy.
+
 ## Deliberate v0.5 limitations
 
 - Single worker per dispatcher, no parallel SQL within one dispatcher.

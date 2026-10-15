@@ -135,6 +135,13 @@ func _run() -> void:
         stress.poll()
         await process_frame
     var errors: Dictionary = stress.get_stats()
+    var native_sqlite_error: Dictionary = invalid.get_result()
+    if not _check(native_sqlite_error.get("error_backend", "") == "sqlite3" and
+            int(native_sqlite_error.get("backend_error_code", 0)) > 0 and
+            native_sqlite_error.get("sqlstate", "") == "" and
+            native_sqlite_error.has("error_category"),
+            "SQLite native diagnostics: " + str(native_sqlite_error)):
+        return
     if not _check(invalid.is_done() and not invalid.get_result().get("ok", true) and
             errors["submitted"] == 481 and errors["completed"] == 481 and
             errors["failed"] == 1 and errors["rejected"] == 0 and
@@ -170,6 +177,14 @@ func _run() -> void:
         var ready: Dictionary = await pg.query_async("SELECT 1 AS n")
         if not _check(ready.get("ok", false) and pg.get_connection_state() == "connected",
                 "PostgreSQL ready: " + str(ready)):
+            return
+        # Keep backend-native errors available without parsing message strings.
+        var pg_invalid: Dictionary = await pg.execute_async("THIS IS NOT SQL")
+        if not _check(not pg_invalid.get("ok", true) and
+                pg_invalid.get("error_backend", "") == "postgresql" and
+                pg_invalid.get("sqlstate", "") == "42601" and
+                pg.get_connection_state() == "connected",
+                "PostgreSQL SQLSTATE diagnostics: " + str(pg_invalid)):
             return
         var terminated: Dictionary = await pg.query_async(
             "SELECT pg_terminate_backend(pg_backend_pid()) AS terminated"

@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace soci { class session; }
+namespace soci { class session; class soci_error; }
 
 namespace godot_soci {
 
@@ -43,6 +43,14 @@ struct Job {
 
 using Row = std::vector<std::pair<std::string, Value>>;
 
+// Portable SOCI error classification plus optional backend-native details.
+struct NativeError {
+    std::string category = "unknown";
+    std::string backend;
+    int64_t backend_code = 0;
+    std::string sqlstate;
+};
+
 struct Completion {
     bool transaction = false;
     bool outcome_unknown = false;
@@ -56,12 +64,14 @@ struct Completion {
     bool truncated = false;
     int64_t affected_rows = 0;
     std::string error;
+    NativeError native_error;
     std::vector<Row> rows;
 };
 
 class QueryWorker final {
 public:
     static Completion run(const Job &job, soci::session &session);
+    static NativeError describe_error(const soci::soci_error &error);
 };
 
 } // namespace godot_soci

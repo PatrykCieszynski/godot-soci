@@ -19,6 +19,7 @@ A [GDExtension](https://docs.godotengine.org/en/stable/tutorials/scripting/gdext
 | Parameter binding | Named values, e.g. `:id` with `{"id": 42}` |
 | Atomic transactions | Statement batches with rollback and optional affected-row checks |
 | Backpressure | Bounded pending requests; no unbounded job queue |
+| Async observability (v0.5) | Connection state notifications, queue depth and timing statistics |
 | Result data | Rows returned as `Array[Dictionary]` inside an explicit result dictionary |
 | Query completion | `SociQueryRequest.completed(result)` signal or just `await` |
 | Binary columns | Explicit `SociBinary` helper for SQLite `BLOB` / PostgreSQL `BYTEA` (not direct native `PackedByteArray` binding yet) |
@@ -138,6 +139,23 @@ Execute result shape:
 Use **named parameters** for values — never interpolate user input into SQL. Maximum returned rows default to **1000**, configurable via `max_rows`; check `truncated`.
 
 Full method signatures, constraints and type mappings: **[API documentation](docs/API.md)**.
+
+## Connection and queue diagnostics (v0.5)
+
+`SociAsyncDatabase` exposes `get_connection_state()`,
+`connection_state_changed(state)`, and `get_stats()` for measuring
+native backlog, SQL execution and main-thread delivery delays.
+
+```gdscript
+db.connection_state_changed.connect(func(state: String):
+    print("Database: ", state))
+print(db.get_stats())
+```
+
+Connection states: `stopped`, `connecting`, `connected`, `failed`,
+`disconnected`. A liveness check occurs **only after a failed SQL
+operation**, not periodically. The addon never automatically retries
+mutations or reconnects; game logic must reconcile uncertain outcomes.
 
 ## Transactions
 

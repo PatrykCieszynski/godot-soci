@@ -34,6 +34,7 @@ required = (
     "tests/async_postgresql_test.gd",
     "tests/sqlite_wal_concurrency_test.gd",
     "tests/async_failure_test.gd",
+    "tests/async_observability_test.gd",
     "scripts/run_windows_tests.ps1",
     "docs/API.md",
     "docs/TESTING.md",

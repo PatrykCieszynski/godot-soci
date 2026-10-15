@@ -4,7 +4,17 @@ extends Node
 ## Native SQL requests run on a dedicated C++ worker.
 ## This node must be inside the SceneTree to dispatch completions.
 
+signal connection_state_changed(state: String)
+
 var _dispatcher: SociQueryDispatcher = SociQueryDispatcher.new()
+
+
+func _init() -> void:
+    _dispatcher.connection_state_changed.connect(_on_connection_state_changed)
+
+
+func _on_connection_state_changed(state: String) -> void:
+    connection_state_changed.emit(state)
 
 
 func _process(_delta: float) -> void:
@@ -33,6 +43,14 @@ func pending() -> int:
 
 func get_last_error() -> String:
     return _dispatcher.get_last_error()
+
+
+func get_connection_state() -> String:
+    return _dispatcher.get_connection_state()
+
+
+func get_stats() -> Dictionary:
+    return _dispatcher.get_stats()
 
 
 func query_async(sql: String, params: Dictionary = {}, max_rows: int = 1000) -> Dictionary:

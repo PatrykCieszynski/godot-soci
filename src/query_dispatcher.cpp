@@ -97,6 +97,13 @@ Dictionary as_dictionary(const godot_soci::Completion &completed) {
     Dictionary result;
     result["ok"] = completed.ok;
     result["error"] = to_godot(completed.error);
+    if (!completed.ok) {
+        // Expose SOCI's classification; never parse driver messages for codes.
+        result["error_category"] = to_godot(completed.native_error.category);
+        result["error_backend"] = to_godot(completed.native_error.backend);
+        result["backend_error_code"] = completed.native_error.backend_code;
+        result["sqlstate"] = to_godot(completed.native_error.sqlstate);
+    }
     if (completed.transaction) {
         Array counts;
         for (int64_t value : completed.affected_rows_per_statement) counts.append(value);
@@ -392,6 +399,7 @@ Ref<SociQueryRequest> SociQueryDispatcher::transaction_async(const Array &statem
 void SociQueryDispatcher::worker_main(std::string backend, std::string connection) {
     std::unique_ptr<soci::session> session;
     std::string connection_error;
+    godot_soci::NativeError connection_error_details;
     try {
         if (backend == "sqlite3") {
             session = std::make_unique<soci::session>(soci::sqlite3, connection);
@@ -401,6 +409,10 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
 #endif
         }
         connection_state_.store(ConnectionState::Connected);
+    } catch (const soci::soci_error &error) {
+        connection_error = "Failed to open database: " + redact(error.what());
+        connection_error_details = godot_soci::QueryWorker::describe_error(error);
+        connection_state_.store(ConnectionState::Failed);
     } catch (const std::exception &error) {
         connection_error = "Failed to open database: " + redact(error.what());
         connection_state_.store(ConnectionState::Failed);
@@ -436,6 +448,10 @@ void SociQueryDispatcher::worker_main(std::string backend, std::string connectio
             completed.error = connection_state_.load() == ConnectionState::Disconnected
                 ? "Database connection was lost; stop and start a new session."
                 : (connection_error.empty() ? "Database unavailable." : connection_error);
+            completed.native_error = connection_error_details;
+            if (connection_state_.load() == ConnectionState::Disconnected) {
+                completed.native_error.category = "connection_error";
+            }
         }
         completed.finished_at = std::chrono::steady_clock::now();
         completed.queue_ms = std::chrono::duration<double, std::milli>(

@@ -64,6 +64,39 @@ which copies the addon and test resources to a temporary Godot project.
 The PostgreSQL credentials in CI are **test-only** and must never be
 distributed with a game client.
 
+## Diagnosing Windows Godot/native crashes
+
+The Windows integration runner saves stdout, stderr and an exit-code summary
+for each Godot test in `$env:RUNNER_TEMP/godot-soci-diagnostics/logs/`.
+The CI `template_debug` build enables `GODOT_SOCI_CI_DIAGNOSTICS=ON`
+to generate a matching GDExtension PDB without changing the /MD runtime
+used by vcpkg's release libraries. It disables function folding and inlining
+to make native crash stack traces easier to interpret.
+
+If a Godot test terminates with a native Windows exception, CI retries **only
+that test** under Microsoft's CDB debugger, attached to the **actual Godot
+engine** rather than the console launcher. CDB captures the exception record,
+registers, stack frames and a minidump (when the crash reproduces).
+The original failure remains a failure even if the debugger replay behaves
+differently.
+
+On job failure, GitHub Actions uploads the
+`windows-native-diagnostics-attempt-*` artifact, including test logs,
+CDB transcripts, available minidumps and matching PDBs, retained for **3 days**.
+The minidumps can contain process-memory values: use disposable test
+credentials and never upload dumps from production databases.
+
+For a crash such as `0xC0000005` (access violation), check the
+`CDB native crash replay` job-log section and the matching `*.cdb.log` for
+`GODOT_SOCI_NATIVE_ACCESS_VIOLATION`. Open a `*.cdb.dmp` in WinDbg with
+the matching PDB for more detail (`!analyze -v`, `kv`).
+If the replay doesn't reproduce the crash, the original per-test logs remain.
+
+On MSVC, `godot-cpp` must not propagate `_HAS_EXCEPTIONS=0` into
+`godot-soci`: SOCI requires exceptions, and inconsistent C++ STL settings
+can break native virtual dispatch. CMake enforces the compatible
+`GODOTCPP_DISABLE_EXCEPTIONS=OFF` configuration on Windows.
+
 ## Test matrix
 
 | Test | What it verifies |

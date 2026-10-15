@@ -202,7 +202,8 @@ jobs:
             '-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',
             '-DGODOTCPP_API_VERSION=4.7',
             '-DGODOTCPP_TARGET=template_debug',
-            '-DGODOT_SOCI_WITH_POSTGRESQL=ON'
+            '-DGODOT_SOCI_WITH_POSTGRESQL=ON',
+            '-DGODOT_SOCI_CI_DIAGNOSTICS=ON'
           )
           & cmake @args
           if ($LASTEXITCODE -ne 0) { throw 'Debug-template configure failed' }
@@ -221,6 +222,21 @@ jobs:
           if (-not $godot) { throw 'Godot console executable missing' }
           & $godot --version
           if ($LASTEXITCODE -ne 0) { throw 'Godot failed' }
+      - name: Prepare CDB native crash debugger
+        shell: pwsh
+        run: |
+          # Windows Server 2022 images include the SDK but not necessarily CDB.
+          $cdb = Join-Path "${env:ProgramFiles(x86)}" 'Windows Kits/10/Debuggers/x64/cdb.exe'
+          if (-not (Test-Path $cdb)) {
+            $sdk = Join-Path $env:RUNNER_TEMP 'winsdksetup-debuggers.exe'
+            curl.exe -fL --retry 3 -o "$sdk" 'https://go.microsoft.com/fwlink/?linkid=2272610'
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot download Microsoft Windows SDK debugging tools installer' }
+            & $sdk /features OptionId.WindowsDesktopDebuggers /quiet /norestart
+            if ($LASTEXITCODE -notin @(0, 3010)) { throw "CDB installer failed ($LASTEXITCODE)" }
+          }
+          if (-not (Test-Path $cdb)) { throw "CDB was not installed: $cdb" }
+          "GODOT_SOCI_CDB=$cdb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Ready for native crash stack traces: $cdb"
       - name: Test real SQLite/PostgreSQL with compiled debug template
         shell: pwsh
         run: |
@@ -264,6 +280,17 @@ jobs:
           name: addon-windows
           path: dist/godot-soci-windows.zip
           if-no-files-found: error
+      - name: Upload Godot crash evidence and PDBs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-native-diagnostics-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/godot-soci-diagnostics/**
+            addons/godot_soci/bin/windows/*.pdb
+            build-debug/*.pdb
+          if-no-files-found: warn
+          retention-days: 3
       - name: Compilation cache statistics
         if: always()
         shell: pwsh

@@ -7,6 +7,7 @@ include(FetchContent)
 set(GODOT_SOCI_GODOT_CPP_REF "b8530af7546a3fcae80cef2477526569fd42ffc2" CACHE STRING "godot-cpp commit")
 set(GODOT_SOCI_SOCI_REF "a9e51707d565baa6e02634453d5e81b84062c94a" CACHE STRING "SOCI commit")
 option(GODOT_SOCI_WITH_POSTGRESQL "Compile PostgreSQL backend (requires libpq)" ON)
+option(GODOT_SOCI_CI_DIAGNOSTICS "Enable Windows GDExtension crash debugging symbols" OFF)
 
 # Match the minimum runtime version in the .gdextension manifest.
 set(GODOTCPP_API_VERSION "4.7" CACHE STRING "Godot API version for godot-cpp")
@@ -20,6 +21,17 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY
         "MultiThreadedDLL"
         CACHE STRING "Use redistributable /MD CRT with release libraries for both Godot template targets" FORCE)
+endif()
+
+# MSVC ABI safety: godot-cpp defaults GODOTCPP_DISABLE_EXCEPTIONS=ON,
+# exposing _HAS_EXCEPTIONS=0 as a PUBLIC compile definition to consumers.
+# SOCI requires C++ exceptions; building our wrapper with /EHsc *alone*
+# does not reverse that STL macro and breaks soci_error virtual dispatch.
+# Disable the godot-cpp flag before creating its target. Scope to MSVC:
+# on Linux godot-cpp's -fno-exceptions is PRIVATE to that target.
+if(MSVC)
+    set(GODOTCPP_DISABLE_EXCEPTIONS OFF CACHE BOOL
+        "Use exception-compatible MSVC STL across godot-cpp and SOCI" FORCE)
 endif()
 
 FetchContent_Declare(godot_cpp
@@ -66,6 +78,14 @@ add_library(godot_soci SHARED
     src/register_types.cpp
 )
 target_compile_features(godot_soci PRIVATE cxx_std_17)
+if(GODOT_SOCI_CI_DIAGNOSTICS)
+    if(MSVC)
+        # Preserve /MD compatibility with vcpkg while disabling optimizations
+        # that obscure crash frames; CMake configuration remains Release.
+        target_compile_options(godot_soci PRIVATE /Od /Ob0 /Z7)
+        target_link_options(godot_soci PRIVATE /DEBUG:FULL /OPT:NOREF /OPT:NOICF)
+    endif()
+endif()
 target_include_directories(godot_soci PRIVATE src include)
 # Editor class reference documentation is embedded in the debug GDExtension.
 file(GLOB DOC_XML CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/doc_classes/*.xml")
@@ -74,6 +94,7 @@ if(DOC_XML AND GODOTCPP_TARGET MATCHES "editor|template_debug")
 endif()
 
 target_link_libraries(godot_soci PRIVATE godot-cpp Threads::Threads SOCI::SQLite3)
+
 if(GODOT_SOCI_WITH_POSTGRESQL)
     target_link_libraries(godot_soci PRIVATE SOCI::PostgreSQL)
     target_compile_definitions(godot_soci PRIVATE GODOT_SOCI_WITH_POSTGRESQL=1)

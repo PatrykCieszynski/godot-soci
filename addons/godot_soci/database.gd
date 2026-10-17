@@ -22,6 +22,10 @@ func get_last_error() -> String:
     return _driver.get_last_error()
 
 
+func get_last_error_details() -> Dictionary:
+    return _driver.get_last_error_details()
+
+
 func get_backend() -> String:
     return _driver.get_backend()
 

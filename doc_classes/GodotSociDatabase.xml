@@ -29,6 +29,10 @@
 
             <description>Last error (connection credentials redacted).</description>
         </method>
+        <method name="get_last_error_details">
+            <return type="Dictionary" />
+            <description>Copied structured diagnostics: error, error_category, backend, backend_error_code and sqlstate. Successful operations clear diagnostics; close preserves them. Capture before rollback. Metadata does not establish transaction outcome or authorize automatic retry.</description>
+        </method>
         <method name="execute">
             <return type="Dictionary" />
             <param index="0" name="sql" type="String" />

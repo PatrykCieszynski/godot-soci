@@ -291,3 +291,34 @@ Hex encoding increases bind/result payload sizes; use smaller payloads
 SQL expressions validate that their identifier argument is a simple SQL name.
 Binary support requires SQLite's built-in `unhex()` function (SQLite >= 3.44).
 Tests verify NUL and non-ASCII octets round-trip through both backends.
+
+## Synchronous structured failures
+
+Native `GodotSociDatabase` and wrapper `SociDatabase` expose
+`get_last_error_details() -> Dictionary`. Failed `execute`/`query` also return the
+same fields with `ok: false`: `error` (redacted text), `error_category`, `backend`,
+`backend_error_code` (integer), and `sqlstate`. Classification is shared with the
+async dispatcher. Existing return types and `get_last_error()` remain unchanged.
+
+`open`, `begin`, `begin_immediate`, `commit` and `rollback` remain boolean. Capture
+error details immediately after failure, before cleanup: successful operations
+clear text/details. `close()` preserves the previous error for inspection; a new
+`open()` resets it before trying the connection. Returned dictionaries are copies.
+
+Local validation and non-SOCI exceptions have category `unknown`, code 0 and empty
+SQLSTATE, never a stale code from a previous SQL error. SQLite may provide its own
+backend code but has no PostgreSQL SQLSTATE. Metadata does not assert whether an
+operation committed and does not trigger retries.
+
+An application may consider a **whole** transaction retry for SQLSTATE `40001` or
+`40P01` only after its transaction owner confirms rollback and preserves the
+original operation identity. Capture the failing phase; a failed/ambiguous COMMIT
+or connection loss requires outcome discovery, not a blind retry. Do not classify
+retryability by error-message text. This API adds no retry/executor/pool policy.
+
+`tests/native_error_test.gd` uses disposable PostgreSQL data through `GODOT_SOCI_PG`
+to exercise unique/syntax errors, lock timeout, statement cancellation, real
+serialization and two-session deadlock, deferred COMMIT, terminated connection,
+cleanup/reset/copy semantics and SQLite fallback. Only the deadlock case sets
+transaction-local 3s statement/2s lock timeouts to allow the default 1s detector;
+this is diagnostic synchronization, not a performance acceptance gate.

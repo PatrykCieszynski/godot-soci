@@ -20,6 +20,7 @@ class GodotSociDatabase final : public RefCounted {
     std::unique_ptr<soci::session> session_;
     String backend_;
     String last_error_;
+    Dictionary last_error_details_;
     bool in_transaction_ = false;
 
     struct BindParameter {
@@ -32,7 +33,9 @@ class GodotSociDatabase final : public RefCounted {
     };
 
     bool fail(const std::string &message);
+    bool fail(const soci::soci_error &error);
     Dictionary failure_result(const std::string &message);
+    Dictionary failure_result(const soci::soci_error &error);
     static std::string utf8(const String &value);
     static String from_utf8(const std::string &value);
     static void bind_arguments(soci::statement &statement, const Dictionary &params, std::deque<BindParameter> &storage);
@@ -51,6 +54,7 @@ public:
     bool is_open() const;
     String get_backend() const;
     String get_last_error() const;
+    Dictionary get_last_error_details() const;
 
     Dictionary execute(const String &sql, const Dictionary &params);
     Dictionary query(const String &sql, const Dictionary &params, int max_rows);

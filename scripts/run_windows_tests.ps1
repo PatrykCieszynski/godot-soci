@@ -211,6 +211,7 @@ $tests = @(
     @{ Name = 'async_failure_test.gd'; Marker = 'ASYNC FAILURE PATHS PASS' },
     @{ Name = 'async_observability_test.gd'; Marker = 'ASYNC OBSERVABILITY PASS' },
     @{ Name = 'postgresql_test.gd'; Marker = 'POSTGRESQL INTEGRATION PASS' },
+    @{ Name = 'native_error_test.gd'; Marker = 'NATIVE ERROR INTEGRATION PASS' },
     @{ Name = 'async_postgresql_test.gd'; Marker = 'ASYNC POSTGRESQL PASS' },
     @{ Name = 'backend_parity_test.gd'; Marker = 'BACKEND TYPE PARITY PASS' }
 )

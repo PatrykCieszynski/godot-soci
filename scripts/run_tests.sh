@@ -42,6 +42,7 @@ run_test res://demo/sqlite/threaded.gd "THREAD DEMO PASS"
 
 if [[ -n "${GODOT_SOCI_PG:-}" ]]; then
     run_test res://tests/postgresql_test.gd "POSTGRESQL INTEGRATION PASS"
+    run_test res://tests/native_error_test.gd "NATIVE ERROR INTEGRATION PASS"
     run_test res://tests/async_postgresql_test.gd "ASYNC POSTGRESQL PASS"
 else
     echo 'POSTGRESQL TEST SKIPPED: set GODOT_SOCI_PG to run it.'

@@ -1,4 +1,5 @@
 #include "godot_soci/database.h"
+#include "godot_soci/query_worker.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/char_string.hpp>
@@ -61,6 +62,7 @@ void GodotSociDatabase::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_open"), &GodotSociDatabase::is_open);
     ClassDB::bind_method(D_METHOD("get_backend"), &GodotSociDatabase::get_backend);
     ClassDB::bind_method(D_METHOD("get_last_error"), &GodotSociDatabase::get_last_error);
+    ClassDB::bind_method(D_METHOD("get_last_error_details"), &GodotSociDatabase::get_last_error_details);
     ClassDB::bind_method(D_METHOD("execute", "sql", "params"), &GodotSociDatabase::execute, DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("query", "sql", "params", "max_rows"), &GodotSociDatabase::query,
                          DEFVAL(Dictionary()), DEFVAL(1000));
@@ -82,14 +84,36 @@ String GodotSociDatabase::from_utf8(const std::string &value) {
 
 bool GodotSociDatabase::fail(const std::string &message) {
     last_error_ = from_utf8(redact_secrets(message));
+    last_error_details_ = Dictionary();
+    last_error_details_["error"] = last_error_;
+    last_error_details_["error_category"] = "unknown";
+    last_error_details_["backend"] = backend_;
+    last_error_details_["backend_error_code"] = int64_t(0);
+    last_error_details_["sqlstate"] = "";
     return false;
+}
+
+bool GodotSociDatabase::fail(const soci::soci_error &error) {
+    fail(error.what());
+    const auto details = godot_soci::QueryWorker::describe_error(error);
+    last_error_details_["error_category"] = from_utf8(details.category);
+    last_error_details_["backend"] = from_utf8(details.backend);
+    last_error_details_["backend_error_code"] = details.backend_code;
+    last_error_details_["sqlstate"] = from_utf8(details.sqlstate);
+    return false;
+}
+
+Dictionary GodotSociDatabase::failure_result(const soci::soci_error &error) {
+    fail(error);
+    Dictionary out = get_last_error_details();
+    out["ok"] = false;
+    return out;
 }
 
 Dictionary GodotSociDatabase::failure_result(const std::string &message) {
     fail(message);
-    Dictionary out;
+    Dictionary out = get_last_error_details();
     out["ok"] = false;
-    out["error"] = last_error_;
     return out;
 }
 
@@ -103,6 +127,7 @@ bool GodotSociDatabase::ensure_open() {
 bool GodotSociDatabase::open(const String &backend, const String &connection_string) {
     close();
     last_error_ = "";
+    last_error_details_ = Dictionary();
     try {
         std::unique_ptr<soci::session> candidate;
         if (backend == "sqlite3") {
@@ -120,9 +145,11 @@ bool GodotSociDatabase::open(const String &backend, const String &connection_str
         backend_ = backend;
         in_transaction_ = false;
         return true;
+    } catch (const soci::soci_error &error) {
+        return fail(error);
     } catch (const std::exception &error) {
         return fail(error.what());
-    }
+    } catch (...) { return fail("Database operation failed with a non-standard C++ exception."); }
 }
 
 void GodotSociDatabase::close() {
@@ -141,6 +168,7 @@ void GodotSociDatabase::close() {
 bool GodotSociDatabase::is_open() const { return session_ && session_->is_connected(); }
 String GodotSociDatabase::get_backend() const { return backend_; }
 String GodotSociDatabase::get_last_error() const { return last_error_; }
+Dictionary GodotSociDatabase::get_last_error_details() const { return last_error_details_.duplicate(true); }
 bool GodotSociDatabase::in_transaction() const { return in_transaction_; }
 
 void GodotSociDatabase::bind_arguments(soci::statement &statement, const Dictionary &params,
@@ -271,7 +299,10 @@ Dictionary GodotSociDatabase::execute(const String &sql, const Dictionary &param
         Dictionary result = success_result();
         result["affected_rows"] = static_cast<int64_t>(statement.get_affected_rows());
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return result;
+    } catch (const soci::soci_error &error) {
+        return failure_result(error);
     } catch (const std::exception &error) {
         return failure_result(error.what());
     } catch (...) {
@@ -306,10 +337,13 @@ Dictionary GodotSociDatabase::query(const String &sql, const Dictionary &params,
         result["rows"] = rows;
         result["truncated"] = truncated;
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return result;
+    } catch (const soci::soci_error &error) {
+        return failure_result(error);
     } catch (const std::exception &error) {
         return failure_result(error.what());
-    }
+    } catch (...) { return failure_result("Database operation failed with a non-standard C++ exception."); }
 }
 
 bool GodotSociDatabase::begin() {
@@ -319,8 +353,11 @@ bool GodotSociDatabase::begin() {
         session_->begin();
         in_transaction_ = true;
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return true;
-    } catch (const std::exception &error) { return fail(error.what()); }
+    } catch (const soci::soci_error &error) { return fail(error); }
+    catch (const std::exception &error) { return fail(error.what()); }
+    catch (...) { return fail("Database operation failed with a non-standard C++ exception."); }
 }
 
 bool GodotSociDatabase::begin_immediate() {
@@ -331,8 +368,11 @@ bool GodotSociDatabase::begin_immediate() {
         session_->once << "BEGIN IMMEDIATE";
         in_transaction_ = true;
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return true;
-    } catch (const std::exception &error) { return fail(error.what()); }
+    } catch (const soci::soci_error &error) { return fail(error); }
+    catch (const std::exception &error) { return fail(error.what()); }
+    catch (...) { return fail("Database operation failed with a non-standard C++ exception."); }
 }
 
 bool GodotSociDatabase::commit() {
@@ -342,8 +382,11 @@ bool GodotSociDatabase::commit() {
         session_->commit();
         in_transaction_ = false;
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return true;
-    } catch (const std::exception &error) { return fail(error.what()); }
+    } catch (const soci::soci_error &error) { return fail(error); }
+    catch (const std::exception &error) { return fail(error.what()); }
+    catch (...) { return fail("Database operation failed with a non-standard C++ exception."); }
 }
 
 bool GodotSociDatabase::rollback() {
@@ -353,8 +396,11 @@ bool GodotSociDatabase::rollback() {
         session_->rollback();
         in_transaction_ = false;
         last_error_ = "";
+        last_error_details_ = Dictionary();
         return true;
-    } catch (const std::exception &error) { return fail(error.what()); }
+    } catch (const soci::soci_error &error) { return fail(error); }
+    catch (const std::exception &error) { return fail(error.what()); }
+    catch (...) { return fail("Database operation failed with a non-standard C++ exception."); }
 }
 
 } // namespace godot

@@ -291,3 +291,62 @@ Hex encoding increases bind/result payload sizes; use smaller payloads
 SQL expressions validate that their identifier argument is a simple SQL name.
 Binary support requires SQLite's built-in `unhex()` function (SQLite >= 3.44).
 Tests verify NUL and non-ASCII octets round-trip through both backends.
+
+## Synchronous structured failures
+
+Native `GodotSociDatabase` and wrapper `SociDatabase` expose
+`get_last_error_details() -> Dictionary`. Failed `execute`/`query` also return the
+same fields with `ok: false`: `error` (redacted text), `error_category`, `error_backend`,
+`backend_error_code` (integer), and `sqlstate`. Classification is shared with the
+async dispatcher, including the `error_backend` key. Existing return types and `get_last_error()` remain unchanged.
+
+`open`, `begin`, `begin_immediate`, `commit` and `rollback` remain boolean. Capture
+error details immediately after failure, before cleanup: successful operations
+clear text/details. `close()` preserves the previous error for inspection; a new
+`open()` resets it before trying the connection. Returned dictionaries are copies.
+
+Local validation and non-SOCI exceptions have category `unknown`, code 0 and empty
+SQLSTATE, never a stale code from a previous SQL error. SQLite may provide its own
+backend code but has no PostgreSQL SQLSTATE. Metadata does not assert whether an
+operation committed and does not trigger retries.
+
+An application may consider a **whole** transaction retry for SQLSTATE `40001` or
+`40P01` only after its transaction owner confirms rollback and preserves the
+original operation identity. Capture the failing phase; a failed/ambiguous COMMIT
+or connection loss requires outcome discovery, not a blind retry. Do not classify
+retryability by error-message text. This API adds no retry/executor/pool policy.
+
+`tests/native_error_test.gd` uses disposable PostgreSQL data through `GODOT_SOCI_PG`
+to exercise unique/syntax errors, lock timeout, statement cancellation, real
+serialization and two-session deadlock, deferred COMMIT, terminated connection,
+cleanup/reset/copy semantics and SQLite fallback. Deadlock synchronization uses
+semaphores: both sessions hold their first row before attempting opposite rows;
+there is no 500ms observation deadline. Only this case uses transaction-local
+10s statement/5s lock/10s idle budgets for default deadlock detection and CI slack,
+not as a throughput or latency gate.
+
+### Transaction lifecycle is not server state or commit outcome
+
+`in_transaction()` is the driver's local explicit-transaction ownership flag.
+It is not `PQtransactionStatus()`. A failed COMMIT keeps it true conservatively,
+but PostgreSQL may already have rolled back and ended that transaction; after
+connection loss the server state may be unavailable. Capture diagnostics before
+cleanup, then explicitly roll back or close/discard the session. Successful
+cleanup clears the local flag, not a reconstructed durable business outcome.
+
+After an ordinary statement error in an explicit PostgreSQL transaction, further
+statements normally fail with `25P02` until rollback. Roll back on that first error;
+do not continue the business use case or attempt to commit its earlier writes.
+PostgreSQL can accept COMMIT on an already aborted transaction as ROLLBACK: the
+legacy boolean can be true while none of those provisional writes persisted.
+A deferred constraint failure at COMMIT can instead return false and leave the
+local flag true after the server has already ended the transaction. Tests cover
+both cases; this PR deliberately preserves existing flag/boolean semantics.
+
+A `40001` retry must rerun the complete transaction, including decisions selecting
+SQL and values; `40P01` may also warrant a whole-transaction retry. SQLSTATE alone
+does not establish application retry safety: preserve business identity, record
+the failure phase, confirm cleanup, bound attempts and re-run the original use
+case. Ambiguous COMMIT/connection loss requires durable outcome discovery first.
+See [PostgreSQL serialization failure handling](https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html)
+and [libpq transaction status](https://www.postgresql.org/docs/current/libpq-status.html).

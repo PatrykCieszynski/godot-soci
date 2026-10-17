@@ -157,6 +157,14 @@ Connection states: `stopped`, `connecting`, `connected`, `failed`,
 operation**, not periodically. The addon never automatically retries
 mutations or reconnects; game logic must reconcile uncertain outcomes.
 
+## Native synchronous error details
+
+`GodotSociDatabase` and `SociDatabase` expose `get_last_error_details()`. Failed
+`execute`/`query` results include backend/category/code/SQLSTATE alongside the
+existing error text; boolean transaction methods retain their return types. Read
+details before successful rollback clears them. This adds diagnostics, not an
+automatic retry policy. See [the API contract](docs/API.md#synchronous-structured-failures).
+
 ## Transactions
 
 Use `transaction_async()` to execute a batch atomically. The optional `expected_affected_rows` acts as an optimistic safety check:

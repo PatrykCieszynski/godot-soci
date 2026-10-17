@@ -87,7 +87,7 @@ bool GodotSociDatabase::fail(const std::string &message) {
     last_error_details_ = Dictionary();
     last_error_details_["error"] = last_error_;
     last_error_details_["error_category"] = "unknown";
-    last_error_details_["backend"] = backend_;
+    last_error_details_["error_backend"] = backend_;
     last_error_details_["backend_error_code"] = int64_t(0);
     last_error_details_["sqlstate"] = "";
     return false;
@@ -97,7 +97,7 @@ bool GodotSociDatabase::fail(const soci::soci_error &error) {
     fail(error.what());
     const auto details = godot_soci::QueryWorker::describe_error(error);
     last_error_details_["error_category"] = from_utf8(details.category);
-    last_error_details_["backend"] = from_utf8(details.backend);
+    last_error_details_["error_backend"] = from_utf8(details.backend);
     last_error_details_["backend_error_code"] = details.backend_code;
     last_error_details_["sqlstate"] = from_utf8(details.sqlstate);
     return false;
@@ -376,6 +376,9 @@ bool GodotSociDatabase::begin_immediate() {
 }
 
 bool GodotSociDatabase::commit() {
+    // in_transaction_ is local lifecycle bookkeeping, not PQtransactionStatus.
+    // An exception retains cleanup ownership even if PostgreSQL already ended
+    // the transaction (or the connection was lost). It is not a retry verdict.
     if (!ensure_open()) return false;
     if (!in_transaction_) return fail("No transaction is active.");
     try {

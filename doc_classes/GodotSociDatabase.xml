@@ -31,7 +31,7 @@
         </method>
         <method name="get_last_error_details">
             <return type="Dictionary" />
-            <description>Copied structured diagnostics: error, error_category, backend, backend_error_code and sqlstate. Successful operations clear diagnostics; close preserves them. Capture before rollback. Metadata does not establish transaction outcome or authorize automatic retry.</description>
+            <description>Copied structured diagnostics: error, error_category, error_backend, backend_error_code and sqlstate. Successful operations clear diagnostics; close preserves them. Capture before rollback. Metadata does not establish transaction outcome or authorize automatic retry.</description>
         </method>
         <method name="execute">
             <return type="Dictionary" />
@@ -59,7 +59,7 @@
         <method name="commit">
             <return type="bool" />
 
-            <description>Commits the current SQL transaction.</description>
+            <description>Issues COMMIT. A false result retains the local transaction flag for cleanup; capture diagnostics before rollback/close. A true result acknowledges the command, not an application outcome: PostgreSQL accepts COMMIT on an already aborted transaction as ROLLBACK. Roll back immediately after statement failure.</description>
         </method>
         <method name="rollback">
             <return type="bool" />
@@ -69,7 +69,7 @@
         <method name="in_transaction">
             <return type="bool" />
 
-            <description>Whether the explicit transaction API considers a transaction active.</description>
+            <description>Local explicit-transaction lifecycle flag, not authoritative PostgreSQL transaction state. A failed COMMIT retains cleanup ownership until successful rollback or close, even when the server already ended the transaction.</description>
         </method>
     </methods>
 

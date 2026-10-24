@@ -71,6 +71,7 @@ FetchContent_Declare(soci_src
 FetchContent_MakeAvailable(soci_src)
 
 add_library(godot_soci SHARED
+    src/sqlite_result.cpp
     src/database.cpp
     src/query_request.cpp
     src/query_worker.cpp
@@ -94,6 +95,14 @@ if(DOC_XML AND GODOTCPP_TARGET MATCHES "editor|template_debug")
 endif()
 
 target_link_libraries(godot_soci PRIVATE godot-cpp Threads::Threads SOCI::SQLite3)
+# Runtime SQLite result types (including expressions) require the pinned native
+# SQLite API used by SOCI. Do not link a second SQLite implementation.
+find_package(SQLite3 REQUIRED)
+if(TARGET SQLite3::SQLite3)
+    target_link_libraries(godot_soci PRIVATE SQLite3::SQLite3)
+else()
+    target_link_libraries(godot_soci PRIVATE SQLite::SQLite3)
+endif()
 
 if(GODOT_SOCI_WITH_POSTGRESQL)
     target_link_libraries(godot_soci PRIVATE SOCI::PostgreSQL)

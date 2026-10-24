@@ -32,6 +32,7 @@ run_test() {
 }
 
 run_test res://tests/sqlite_test.gd "SQLITE INTEGRATION PASS"
+run_test res://tests/sqlite_result_types_test.gd "SQLITE RESULT TYPES PASS"
 run_test res://tests/async_sqlite_test.gd "ASYNC SQLITE PASS"
 run_test res://tests/backend_parity_test.gd "BACKEND TYPE PARITY PASS"
 run_test res://demo/backend_switch.gd "BACKEND SWITCH DEMO PASS"

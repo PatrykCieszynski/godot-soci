@@ -64,6 +64,15 @@ which copies the addon and test resources to a temporary Godot project.
 The PostgreSQL credentials in CI are **test-only** and must never be
 distributed with a game client.
 
+## SQLite result storage classes
+
+`sqlite_result_types_test.gd` runs through both synchronous and asynchronous
+queries in both OS integration runners. It covers INTEGER int64 bounds, COUNT /
+SUM and bound expressions, numeric-looking TEXT, NULL-first and mixed-type rows,
+empty/truncated results, duplicate column rejection and unsupported BLOB errors.
+A custom declaration with INSERT RETURNING checks that type discovery cannot
+execute a statement twice. This is a driver contract, not game balance evidence.
+
 ## Diagnosing Windows Godot/native crashes
 
 The Windows integration runner saves stdout, stderr and an exit-code summary

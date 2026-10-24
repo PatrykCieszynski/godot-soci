@@ -55,6 +55,15 @@ Check `ok` before accessing optional success fields. `truncated=true`
 means results exceeded the cap: use pagination for big datasets. A `max_rows`
 cap does *not* limit row size/memory usage.
 
+SQLite results use each value's runtime storage class, including expressions,
+aggregates and mixed-type columns: INTEGER becomes a Godot `int` (signed int64),
+REAL a `float`, TEXT a `String`, and NULL `null`. Numeric-looking TEXT is never
+inferred to be a number. This does not depend on declaring a column `BIGINT`:
+SQLite `INTEGER` also holds the complete signed int64 range. BLOB remains an
+explicit unsupported result type; use the existing binary helper. The same
+conversion runs in synchronous and asynchronous queries. Queries are not executed
+again to discover result types.
+
 Always use `begin()/commit()/rollback()` to manage explicit transactions
 rather than `execute("BEGIN")`; bypassing the public API can desynchronize
 the internal transaction flag.

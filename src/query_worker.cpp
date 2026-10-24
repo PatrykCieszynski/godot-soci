@@ -1,4 +1,5 @@
 #include "godot_soci/query_worker.h"
+#include "godot_soci/sqlite_result.h"
 
 #include <soci/soci.h>
 
@@ -202,16 +203,20 @@ Completion QueryWorker::run(const Job &job, soci::session &session) {
         soci::statement statement(session);
         statement.alloc();
         statement.prepare(job.sql);
-        if (job.query) statement.exchange(soci::into(record));
+        const bool sqlite = session.get_backend_name() == "sqlite3";
+        if (job.query && !sqlite) statement.exchange(soci::into(record));
         bind_arguments(statement, job.params, bindings);
         statement.define_and_bind();
 
         if (job.query) {
-            statement.execute();
-            while (static_cast<int>(result.rows.size()) < job.max_rows && statement.fetch()) {
-                result.rows.push_back(copy_row(record));
+            bool available;
+            if (sqlite) available = statement.execute(true);
+            else { statement.execute(); available = statement.fetch(); }
+            while (static_cast<int>(result.rows.size()) < job.max_rows && available) {
+                result.rows.push_back(sqlite ? read_sqlite_row(statement) : copy_row(record));
+                available = sqlite ? fetch_sqlite_row(statement) : statement.fetch();
             }
-            result.truncated = static_cast<int>(result.rows.size()) == job.max_rows && statement.fetch();
+            result.truncated = available;
         } else {
             statement.execute(true);
             result.affected_rows = static_cast<int64_t>(statement.get_affected_rows());

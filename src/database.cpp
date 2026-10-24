@@ -1,4 +1,5 @@
 #include "godot_soci/database.h"
+#include "godot_soci/sqlite_result.h"
 #include "godot_soci/query_worker.h"
 
 #include <godot_cpp/core/class_db.hpp>
@@ -323,16 +324,37 @@ Dictionary GodotSociDatabase::query(const String &sql, const Dictionary &params,
         soci::statement statement(*session_);
         statement.alloc();
         statement.prepare(utf8(sql));
-        statement.exchange(soci::into(record));
+        const bool sqlite = backend_ == "sqlite3";
+        if (!sqlite) statement.exchange(soci::into(record));
         bind_arguments(statement, params, bindings);
         statement.define_and_bind();
-        statement.execute();
+        bool available;
+        if (sqlite) available = statement.execute(true);
+        else { statement.execute(); available = statement.fetch(); }
         Array rows;
-        while (rows.size() < max_rows && statement.fetch()) {
-            rows.append(row_to_dictionary(record));
+        while (rows.size() < max_rows && available) {
+            if (!sqlite) {
+                rows.append(row_to_dictionary(record));
+            } else {
+                Dictionary row;
+                for (const auto &column : godot_soci::read_sqlite_row(statement)) {
+                    const auto &value = column.second;
+                    const String name = from_utf8(column.first);
+                    switch (value.kind) {
+                        case godot_soci::ValueKind::Null: row[name] = Variant(); break;
+                        case godot_soci::ValueKind::Integer: row[name] = value.integer; break;
+                        case godot_soci::ValueKind::Real: row[name] = value.real; break;
+                        case godot_soci::ValueKind::Text:
+                            row[name] = String::utf8(value.text.data(), static_cast<int64_t>(value.text.size()));
+                            break;
+                    }
+                }
+                rows.append(row);
+            }
+            // Fetch one extra row for the same bounded-result contract on both backends.
+            available = sqlite ? godot_soci::fetch_sqlite_row(statement) : statement.fetch();
         }
-        // Read one extra row so callers can detect truncation at a page boundary.
-        const bool truncated = rows.size() == max_rows && statement.fetch();
+        const bool truncated = available;
         Dictionary result = success_result();
         result["rows"] = rows;
         result["truncated"] = truncated;

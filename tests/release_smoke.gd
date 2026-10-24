@@ -31,6 +31,13 @@ func _run() -> void:
     if not native_result.get("ok", false) or int(native_result["rows"][0]["answer"]) != 42:
         _failure("Native SQL test: " + str(native_result))
         return
+    if not native_db.execute("CREATE TABLE result_storage (amount INTEGER, label TEXT)").get("ok", false) or not native_db.execute("INSERT INTO result_storage VALUES(:amount,:label)", {"amount": 9000000000000000, "label": "0000123"}).get("ok", false):
+        _failure("Packaged SQLite result schema")
+        return
+    var storage := native_db.query("SELECT amount, label, (SELECT COUNT(*) FROM result_storage) AS n FROM result_storage")
+    if not storage.get("ok", false) or typeof(storage.rows[0].amount) != TYPE_INT or storage.rows[0].amount != 9000000000000000 or typeof(storage.rows[0].n) != TYPE_INT or storage.rows[0].label != "0000123":
+        _failure("Packaged SQLite storage classes: " + str(storage))
+        return
     native_db.close()
 
     var wrapper := SociAsyncDatabase.new()

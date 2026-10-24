@@ -206,6 +206,7 @@ Invoke-GodotBounded -Arguments @('--headless', '--path', '.', '--editor',
 
 $tests = @(
     @{ Name = 'sqlite_test.gd'; Marker = 'SQLITE INTEGRATION PASS' },
+    @{ Name = 'sqlite_result_types_test.gd'; Marker = 'SQLITE RESULT TYPES PASS' },
     @{ Name = 'async_sqlite_test.gd'; Marker = 'ASYNC SQLITE PASS' },
     @{ Name = 'sqlite_wal_concurrency_test.gd'; Marker = 'SQLITE WAL CONCURRENCY PASS' },
     @{ Name = 'async_failure_test.gd'; Marker = 'ASYNC FAILURE PATHS PASS' },
